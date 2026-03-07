@@ -1,0 +1,42 @@
+# Claude Code
+.claude/
+
+# Docs (generated specs)
+docs/
+
+# Binary
+watchword
+word-store-mcp
+
+# Data
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Secrets & credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+credentials*
+**/secrets/
+*.secret
+
+# Logs
+*.log

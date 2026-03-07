@@ -1,0 +1,77 @@
+server:
+  transport: "stdio"
+  sse_port: 8080
+  health_port: 8081
+
+database:
+  driver: "sqlite"
+  sqlite:
+    path: "./data/word-store.db"
+  postgres:
+    dsn: "postgres://wordstore:wordstore@localhost:5434/wordstore?sslmode=disable"
+
+auth:
+  enabled: true
+  tokens:
+    - "your-secret-token-1"
+  # resource_metadata:               # RFC 9728 Protected Resource Metadata (MCP OAuth)
+  #   resource: "https://watchword.example.com"
+  #   authorization_servers:
+  #     - "https://auth.example.com"
+  #   bearer_methods_supported: ["header"]
+  #   scopes_supported: []
+  # jwt:                             # External OAuth/JWT validation
+  #   jwks_url: "https://auth.example.com/.well-known/jwks.json"
+  #   issuer: "https://auth.example.com/"
+  #   audience: "https://watchword.example.com"
+  # oauth_metadata:                  # Legacy AS metadata (2025-03-26 MCP spec compat)
+  #   authorization_endpoint: "https://auth.example.com/authorize"
+  #   token_endpoint: "https://auth.example.com/oauth/token"
+
+expiration:
+  enabled: true
+  interval_hours: 24
+  ttl_hours: 168
+
+logging:
+  level: "info"
+  format: "json"
+
+# Tool descriptions and property descriptions sent to the LLM.
+# Override any field to customize prompts. Omit to use built-in defaults.
+# tools:
+#   store_entry:
+#     description: "Store a payload under a memorable keyword..."
+#     properties:
+#       word: "A memorable keyword or short phrase for this entry."
+#       payload: "The content/prompt to store."
+#       ttl_hours: "Optional. Override default TTL in hours. 0 = never expires."
+#   get_entry:
+#     description: "Retrieve a stored entry by its unique ID (UUID)."
+#     properties:
+#       id: "The UUID of the entry to retrieve."
+#   get_entry_by_word:
+#     description: "Retrieve a stored entry by its exact keyword."
+#     properties:
+#       word: "The exact keyword to look up."
+#       include_expired: "If true, also search expired entries. Default: false."
+#   search_entries:
+#     description: "Search for entries whose keyword matches a pattern."
+#     properties:
+#       pattern: "LIKE pattern to match against keywords."
+#       status: "Filter by status: 'active', 'expired', or 'all'."
+#   restore_entry:
+#     description: "Restore an expired entry back to active status."
+#     properties:
+#       id: "The UUID of the expired entry to restore."
+#       new_ttl_hours: "Optional. Set a new TTL in hours."
+#   list_entries:
+#     description: "List stored entries with optional filtering."
+#     properties:
+#       status: "Filter by status: 'active', 'expired', or 'all'."
+#       sort_by: "Sort field: 'created_at', 'updated_at', or 'word'."
+#       sort_order: "Sort direction: 'asc' or 'desc'."
+#   delete_entry:
+#     description: "Permanently delete a stored entry by its UUID."
+#     properties:
+#       id: "The UUID of the entry to delete."

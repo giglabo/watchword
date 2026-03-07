@@ -1,0 +1,30 @@
+# Gitleaks configuration
+# https://github.com/gitleaks/gitleaks
+
+title = "Watchword gitleaks config"
+
+[extend]
+# Use the default gitleaks rules as a base
+useDefault = true
+
+# Allow known example/test placeholder values
+[allowlist]
+  description = "Allow placeholder and test values"
+
+  paths = [
+    '''vendor/''',
+    '''testdata/''',
+  ]
+
+  regexTarget = "match"
+  regexes = [
+    # Placeholder tokens used in examples, tests, and docs
+    '''your-secret-token''',
+    '''your-token-here''',
+    '''secret''',
+    '''changeme''',
+    '''test-token''',
+    # Example DB DSNs with dev credentials
+    '''postgres://watchword:changeme@''',
+    '''postgres://dev:dev@''',
+  ]

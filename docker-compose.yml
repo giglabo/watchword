@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wordstore
+      POSTGRES_PASSWORD: wordstore
+      POSTGRES_DB: wordstore
+    ports:
+      - "5435:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wordstore"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  watchword:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8001:8080"
+    environment:
+      WORDSTORE_SERVER_TRANSPORT: "http"
+      WORDSTORE_SERVER_HTTP_PORT: "8080"
+      WORDSTORE_SERVER_HEALTH_PORT: "8081"
+      WORDSTORE_DATABASE_DRIVER: postgres
+      WORDSTORE_DATABASE_POSTGRES_DSN: "postgres://wordstore:wordstore@postgres:5432/wordstore?sslmode=disable"
+      WORDSTORE_AUTH_ENABLED: "false"
+      WORDSTORE_LOGGING_FORMAT: "text"
+      WORDSTORE_LOGGING_LEVEL: "debug"
+      WORDSTORE_LOGGING_FILE: "/data/watchword.log"
+    volumes:
+      - ./data:/data
+
+volumes:
+  pgdata:
