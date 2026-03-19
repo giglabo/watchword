@@ -10,7 +10,8 @@ LLM conversations are ephemeral. Watchword gives your assistant persistent, name
 
 ## Features
 
-- **7 MCP tools** for storing, retrieving, searching, listing, restoring, and deleting entries
+- **10 MCP tools** for storing, retrieving, searching, listing, restoring, deleting entries, and file upload/download
+- **S3 file storage** — upload/download files up to 1GB via presigned URLs (works with AWS S3 and Cloudflare R2)
 - **Collision resolution** — if a keyword is taken, the server auto-appends a suffix (`rabbit` -> `rabbit2`)
 - **SQLite or PostgreSQL** backends
 - **Automatic expiration** — entries expire after a configurable TTL (or never, with `ttl_hours: 0`)
@@ -98,15 +99,31 @@ Or add to `~/.mcp.json`:
 
 ## MCP tools
 
+### Text entries
+
 | Tool | Description |
 |------|-------------|
 | `store_entry` | Store a payload under a keyword. Auto-resolves collisions by appending a number suffix. |
-| `get_entry` | Retrieve an entry by its UUID. |
-| `get_entry_by_word` | Retrieve an entry by its exact keyword. |
-| `search_entries` | Search entries with a SQL LIKE pattern (e.g. `%cat%`). |
-| `list_entries` | List entries with filtering by status, sorting, and pagination. |
+| `get_entry` | Retrieve an entry by its UUID. Returns full payload. |
+| `get_entry_by_word` | Retrieve an entry by its exact keyword. Returns full payload. |
+| `search_entries` | Search entries with a SQL LIKE pattern (e.g. `%cat%`). Returns compact summaries (no payload). |
+| `search_words` | Lightweight keyword search — returns only word, ID, status, and type. Ideal for browsing. |
+| `list_entries` | List entries with filtering, sorting, and pagination. Returns compact summaries (no payload). |
 | `restore_entry` | Restore an expired entry back to active status. |
-| `delete_entry` | Permanently delete an entry by UUID. |
+| `delete_entry` | Permanently delete an entry by UUID **or keyword**. |
+
+> **Token-saving design**: `list_entries`, `search_entries`, and `search_words` intentionally omit payload content to keep responses small. Use `get_entry` or `get_entry_by_word` to retrieve the full content of a specific entry.
+
+### File entries (requires S3)
+
+These tools are only available when S3 is configured. File data never passes through the MCP server — only presigned URLs are exchanged.
+
+| Tool | Description |
+|------|-------------|
+| `upload_file` | Create a file entry and get a presigned PUT URL. Upload with `curl -X PUT -T file '<url>'`. |
+| `download_file` | Get a presigned GET URL for a file entry. Download with `curl -o file '<url>'`. |
+
+When a file entry is fetched via `get_entry` or `get_entry_by_word`, the response includes a hint to use `download_file` instead of returning raw file content.
 
 ## Configuration
 
@@ -202,6 +219,48 @@ Register these redirect URIs in your authorization server for Claude:
 - `https://claude.ai/api/mcp/auth_callback`
 - `https://claude.com/api/mcp/auth_callback`
 - `http://localhost:6274/oauth/callback` (Claude Code)
+
+### S3 file storage (optional)
+
+When configured, Watchword registers `upload_file` and `download_file` tools. Files are stored in S3 (or any S3-compatible service like Cloudflare R2) and transferred via presigned URLs — the MCP server never touches file data.
+
+| Setting | Env var | Default | Description |
+|---------|---------|---------|-------------|
+| `s3.endpoint` | `WORDSTORE_S3_ENDPOINT` | *(empty = AWS)* | Custom endpoint URL (required for R2, MinIO) |
+| `s3.region` | `WORDSTORE_S3_REGION` | | AWS region (e.g. `eu-central-1`) |
+| `s3.bucket` | `WORDSTORE_S3_BUCKET` | | S3 bucket name |
+| `s3.presign_ttl_minutes` | `WORDSTORE_S3_PRESIGN_TTL_MINUTES` | `15` | How long presigned URLs remain valid |
+| `s3.max_file_size_bytes` | `WORDSTORE_S3_MAX_FILE_SIZE_BYTES` | `1073741824` | Max file size (default 1GB) |
+| | `WORDSTORE_S3_ACCESS_KEY_ID` | | S3 access key (env var only — never in config file) |
+| | `WORDSTORE_S3_SECRET_ACCESS_KEY` | | S3 secret key (env var only — never in config file) |
+
+Example config for Cloudflare R2:
+
+```yaml
+s3:
+  endpoint: "https://<account-id>.r2.cloudflarestorage.com"
+  region: "auto"
+  bucket: "watchword-files"
+  presign_ttl_minutes: 15
+  max_file_size_bytes: 1073741824
+```
+
+```bash
+export WORDSTORE_S3_ACCESS_KEY_ID="your-r2-access-key"
+export WORDSTORE_S3_SECRET_ACCESS_KEY="your-r2-secret-key"
+```
+
+Example config for AWS S3:
+
+```yaml
+s3:
+  region: "eu-central-1"
+  bucket: "watchword-files"
+```
+
+**S3 object cleanup**: Expired file entries do not auto-delete S3 objects. Use [S3 lifecycle rules](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html) for garbage collection.
+
+If `s3` is not configured, only the original text-based tools are registered — no S3 dependency.
 
 ### Expiration
 
@@ -373,7 +432,8 @@ cmd/server/main.go        Entry point, config loading, DI wiring, graceful shutd
 internal/domain/          Entry struct, validation, sentinel errors
 internal/config/          YAML + env var config loading
 internal/repository/      Repository interface + SQLite/PostgreSQL implementations
-internal/service/         Business logic (collision resolution, store, restore, search)
+internal/service/         Business logic (collision resolution, store, restore, search, file ops)
+internal/s3/              S3 presigned URL client (AWS SDK v2)
 internal/auth/            Bearer token and JWT/JWKS validation
 internal/mcp/             MCP server setup and tool handlers
 internal/worker/          Background expiration goroutine
