@@ -7,6 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/watchword/watchword/internal/domain"
 	"github.com/watchword/watchword/internal/service"
 )
 
@@ -65,6 +66,22 @@ func (h *Handlers) GetEntry(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	}
 
 	h.logger.Debug("get_entry success", "id", id, "word", entry.Word, "status", entry.Status)
+
+	if entry.EntryType == domain.EntryTypeFile {
+		resp := map[string]interface{}{
+			"id":         entry.ID.String(),
+			"word":       entry.Word,
+			"status":     entry.Status,
+			"entry_type": entry.EntryType,
+			"created_at": entry.CreatedAt,
+			"updated_at": entry.UpdatedAt,
+			"hint":       "This is a file entry. Use the download_file tool with word '" + entry.Word + "' to get a download URL.",
+		}
+		if entry.ExpiresAt != nil {
+			resp["expires_at"] = entry.ExpiresAt
+		}
+		return marshalResult(resp)
+	}
 	return marshalResult(entry)
 }
 
@@ -81,6 +98,22 @@ func (h *Handlers) GetEntryByWord(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	h.logger.Debug("get_entry_by_word success", "word", word, "id", entry.ID, "status", entry.Status)
+
+	if entry.EntryType == domain.EntryTypeFile {
+		resp := map[string]interface{}{
+			"id":         entry.ID.String(),
+			"word":       entry.Word,
+			"status":     entry.Status,
+			"entry_type": entry.EntryType,
+			"created_at": entry.CreatedAt,
+			"updated_at": entry.UpdatedAt,
+			"hint":       "This is a file entry. Use the download_file tool with word '" + entry.Word + "' to get a download URL.",
+		}
+		if entry.ExpiresAt != nil {
+			resp["expires_at"] = entry.ExpiresAt
+		}
+		return marshalResult(resp)
+	}
 	return marshalResult(entry)
 }
 

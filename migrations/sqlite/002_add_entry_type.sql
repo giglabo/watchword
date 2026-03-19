@@ -1,0 +1,1 @@
+ALTER TABLE entries ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'text';

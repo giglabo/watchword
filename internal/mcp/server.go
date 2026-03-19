@@ -34,6 +34,12 @@ var propTypes = map[string]map[string]string{
 	"delete_entry": {
 		"id": "string",
 	},
+	"upload_file": {
+		"word": "string", "filename": "string", "content_type": "string", "ttl_hours": "integer",
+	},
+	"download_file": {
+		"word": "string",
+	},
 }
 
 func buildProps(toolName string, descs map[string]string) map[string]any {
@@ -46,7 +52,7 @@ func buildProps(toolName string, descs map[string]string) map[string]any {
 	return props
 }
 
-func NewServer(svc *service.EntryService, tools config.ToolsConfig, logger *slog.Logger) *server.MCPServer {
+func NewServer(svc *service.EntryService, fileSvc *service.FileService, tools config.ToolsConfig, logger *slog.Logger) *server.MCPServer {
 	s := server.NewMCPServer(
 		"watchword",
 		"1.0.0",
@@ -123,6 +129,31 @@ func NewServer(svc *service.EntryService, tools config.ToolsConfig, logger *slog
 			Required:   []string{"id"},
 		},
 	}, h.DeleteEntry)
+
+	// Conditionally register file tools when S3 is configured
+	if fileSvc != nil {
+		fh := &FileHandlers{svc: fileSvc, logger: logger}
+
+		s.AddTool(mcp.Tool{
+			Name:        "upload_file",
+			Description: tools.UploadFile.Description,
+			InputSchema: mcp.ToolInputSchema{
+				Type:       "object",
+				Properties: buildProps("upload_file", tools.UploadFile.Properties),
+				Required:   []string{"word", "filename"},
+			},
+		}, fh.UploadFile)
+
+		s.AddTool(mcp.Tool{
+			Name:        "download_file",
+			Description: tools.DownloadFile.Description,
+			InputSchema: mcp.ToolInputSchema{
+				Type:       "object",
+				Properties: buildProps("download_file", tools.DownloadFile.Properties),
+				Required:   []string{"word"},
+			},
+		}, fh.DownloadFile)
+	}
 
 	return s
 }
