@@ -12,8 +12,9 @@ import (
 )
 
 type Handlers struct {
-	svc    *service.EntryService
-	logger *slog.Logger
+	svc     *service.EntryService
+	fileSvc *service.FileService
+	logger  *slog.Logger
 }
 
 func (h *Handlers) StoreEntry(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -244,6 +245,14 @@ func (h *Handlers) DeleteEntry(ctx context.Context, req mcp.CallToolRequest) (*m
 	id := req.GetString("id", "")
 
 	h.logger.Debug("delete_entry called", "id", id)
+
+	// If S3 is configured, fetch the entry first to check if it's a file entry
+	if h.fileSvc != nil {
+		entry, err := h.svc.ResolveEntry(ctx, id)
+		if err == nil && entry.EntryType == domain.EntryTypeFile {
+			h.fileSvc.DeleteFileObject(ctx, entry)
+		}
+	}
 
 	if err := h.svc.DeleteEntry(ctx, id); err != nil {
 		h.logger.Warn("delete_entry failed", "id", id, "error", err)

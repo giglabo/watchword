@@ -62,7 +62,7 @@ func NewServer(svc *service.EntryService, fileSvc *service.FileService, tools co
 		server.WithLogging(),
 	)
 
-	h := &Handlers{svc: svc, logger: logger}
+	h := &Handlers{svc: svc, fileSvc: fileSvc, logger: logger}
 
 	s.AddTool(mcp.Tool{
 		Name:        "store_entry",

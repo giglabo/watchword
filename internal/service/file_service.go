@@ -153,6 +153,24 @@ func (s *FileService) UploadFile(ctx context.Context, word string, filename stri
 	return result, nil
 }
 
+// DeleteFileObject deletes the S3 object for a file entry. Best-effort: logs
+// errors but does not block entry deletion.
+func (s *FileService) DeleteFileObject(ctx context.Context, entry *domain.Entry) {
+	if entry.EntryType != domain.EntryTypeFile {
+		return
+	}
+	var meta domain.FileMetadata
+	if err := json.Unmarshal([]byte(entry.Payload), &meta); err != nil {
+		s.logger.Warn("failed to parse file metadata for S3 cleanup", "id", entry.ID, "error", err)
+		return
+	}
+	if err := s.presigner.DeleteObject(ctx, meta.S3Key); err != nil {
+		s.logger.Warn("failed to delete S3 object", "id", entry.ID, "s3_key", meta.S3Key, "error", err)
+		return
+	}
+	s.logger.Info("deleted S3 object", "id", entry.ID, "s3_key", meta.S3Key)
+}
+
 func (s *FileService) DownloadFile(ctx context.Context, word string) (*DownloadResult, error) {
 	word = strings.TrimSpace(word)
 	if word == "" {
