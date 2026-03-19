@@ -80,10 +80,9 @@ func (c *Client) DeleteObject(ctx context.Context, key string) error {
 
 func (c *Client) PresignPUT(ctx context.Context, key string, contentType string, maxSize int64) (string, error) {
 	input := &s3.PutObjectInput{
-		Bucket:        aws.String(c.bucket),
-		Key:           aws.String(key),
-		ContentType:   aws.String(contentType),
-		ContentLength: aws.Int64(maxSize),
+		Bucket:      aws.String(c.bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
 	}
 
 	result, err := c.presignClient.PresignPutObject(ctx, input,
