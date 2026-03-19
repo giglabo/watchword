@@ -14,13 +14,16 @@ import (
 	"github.com/watchword/watchword/internal/config"
 )
 
-// Presigner generates presigned URLs for S3 PUT and GET operations.
+// Presigner generates presigned URLs for S3 PUT and GET operations,
+// and supports direct object deletion for cleanup.
 type Presigner interface {
 	PresignPUT(ctx context.Context, key string, contentType string, maxSize int64) (string, error)
 	PresignGET(ctx context.Context, key string, downloadFilename string) (string, error)
+	DeleteObject(ctx context.Context, key string) error
 }
 
 type Client struct {
+	s3Client      *s3.Client
 	presignClient *s3.PresignClient
 	bucket        string
 	presignTTL    time.Duration
@@ -57,10 +60,22 @@ func NewClient(ctx context.Context, cfg *config.S3Config) (*Client, error) {
 	presignClient := s3.NewPresignClient(s3Client)
 
 	return &Client{
+		s3Client:      s3Client,
 		presignClient: presignClient,
 		bucket:        cfg.Bucket,
 		presignTTL:    time.Duration(cfg.PresignTTLMinutes) * time.Minute,
 	}, nil
+}
+
+func (c *Client) DeleteObject(ctx context.Context, key string) error {
+	_, err := c.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("deleting S3 object %s: %w", key, err)
+	}
+	return nil
 }
 
 func (c *Client) PresignPUT(ctx context.Context, key string, contentType string, maxSize int64) (string, error) {

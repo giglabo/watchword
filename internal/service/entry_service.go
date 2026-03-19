@@ -221,6 +221,19 @@ func (s *EntryService) RestoreEntry(ctx context.Context, idStr string, newTTLHou
 	return result, nil
 }
 
+// ResolveEntry resolves a UUID or word to an entry without modifying it.
+func (s *EntryService) ResolveEntry(ctx context.Context, idOrWord string) (*domain.Entry, error) {
+	id, err := uuid.Parse(idOrWord)
+	if err == nil {
+		return s.repo.GetByID(ctx, id)
+	}
+	word := strings.TrimSpace(idOrWord)
+	if word == "" {
+		return nil, domain.ErrInvalidWord
+	}
+	return s.repo.GetByWord(ctx, word, true)
+}
+
 func (s *EntryService) DeleteEntry(ctx context.Context, idOrWord string) error {
 	// Try UUID first
 	id, err := uuid.Parse(idOrWord)
