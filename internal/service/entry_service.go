@@ -221,12 +221,23 @@ func (s *EntryService) RestoreEntry(ctx context.Context, idStr string, newTTLHou
 	return result, nil
 }
 
-func (s *EntryService) DeleteEntry(ctx context.Context, idStr string) error {
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		return domain.ErrInvalidUUID
+func (s *EntryService) DeleteEntry(ctx context.Context, idOrWord string) error {
+	// Try UUID first
+	id, err := uuid.Parse(idOrWord)
+	if err == nil {
+		return s.repo.Delete(ctx, id)
 	}
-	return s.repo.Delete(ctx, id)
+
+	// Not a UUID — try to find by word
+	word := strings.TrimSpace(idOrWord)
+	if word == "" {
+		return domain.ErrInvalidWord
+	}
+	entry, err := s.repo.GetByWord(ctx, word, false)
+	if err != nil {
+		return err
+	}
+	return s.repo.Delete(ctx, entry.ID)
 }
 
 func resolveWord(ctx context.Context, repo repository.Repository, baseWord string) (string, bool, error) {

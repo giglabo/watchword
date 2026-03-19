@@ -48,7 +48,7 @@ func (r *PostgresRepo) Migrate(ctx context.Context) error {
 		return fmt.Errorf("creating schema_migrations table: %w", err)
 	}
 
-	migrationFiles := []string{"001_init.sql"}
+	migrationFiles := []string{"001_init.sql", "002_add_entry_type.sql"}
 	for _, name := range migrationFiles {
 		var count int
 		err := r.q.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = $1`, name).Scan(&count)
@@ -92,11 +92,14 @@ func (r *PostgresRepo) Store(ctx context.Context, entry *domain.Entry) (*domain.
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 	entry.Status = domain.StatusActive
+	if entry.EntryType == "" {
+		entry.EntryType = domain.EntryTypeText
+	}
 
 	_, err := r.q.Exec(ctx,
-		`INSERT INTO entries (id, word, payload, status, created_at, updated_at, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		entry.ID, entry.Word, entry.Payload, string(entry.Status),
+		`INSERT INTO entries (id, word, payload, status, entry_type, created_at, updated_at, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		entry.ID, entry.Word, entry.Payload, string(entry.Status), string(entry.EntryType),
 		entry.CreatedAt, entry.UpdatedAt, entry.ExpiresAt,
 	)
 	if err != nil {
@@ -107,13 +110,13 @@ func (r *PostgresRepo) Store(ctx context.Context, entry *domain.Entry) (*domain.
 
 func (r *PostgresRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Entry, error) {
 	row := r.q.QueryRow(ctx,
-		`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries WHERE id = $1`, id,
+		`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries WHERE id = $1`, id,
 	)
 	return scanPgEntry(row)
 }
 
 func (r *PostgresRepo) GetByWord(ctx context.Context, word string, includeExpired bool) (*domain.Entry, error) {
-	query := `SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries WHERE word = $1`
+	query := `SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries WHERE word = $1`
 	if !includeExpired {
 		query += ` AND status = 'active'`
 	}
@@ -138,7 +141,7 @@ func (r *PostgresRepo) SearchByLike(ctx context.Context, pattern string, status 
 		return nil, 0, fmt.Errorf("counting entries: %w", err)
 	}
 
-	query := fmt.Sprintf(`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries %s ORDER BY word ASC LIMIT $%d OFFSET $%d`,
+	query := fmt.Sprintf(`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries %s ORDER BY word ASC LIMIT $%d OFFSET $%d`,
 		where, idx, idx+1)
 	args = append(args, limit, offset)
 
@@ -171,7 +174,7 @@ func (r *PostgresRepo) List(ctx context.Context, status string, limit int, offse
 		return nil, 0, fmt.Errorf("counting entries: %w", err)
 	}
 
-	query := fmt.Sprintf(`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries %s ORDER BY %s %s LIMIT $%d OFFSET $%d`,
+	query := fmt.Sprintf(`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries %s ORDER BY %s %s LIMIT $%d OFFSET $%d`,
 		where, sortBy, sortOrder, idx, idx+1)
 	args = append(args, limit, offset)
 
@@ -251,8 +254,8 @@ func (r *PostgresRepo) WithTx(ctx context.Context, fn func(Repository) error) er
 
 func scanPgEntry(row pgx.Row) (*domain.Entry, error) {
 	var e domain.Entry
-	var status string
-	err := row.Scan(&e.ID, &e.Word, &e.Payload, &status, &e.CreatedAt, &e.UpdatedAt, &e.ExpiresAt)
+	var status, entryType string
+	err := row.Scan(&e.ID, &e.Word, &e.Payload, &status, &entryType, &e.CreatedAt, &e.UpdatedAt, &e.ExpiresAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrNotFound
@@ -260,6 +263,7 @@ func scanPgEntry(row pgx.Row) (*domain.Entry, error) {
 		return nil, fmt.Errorf("scanning entry: %w", err)
 	}
 	e.Status = domain.EntryStatus(status)
+	e.EntryType = domain.EntryType(entryType)
 	return &e, nil
 }
 
@@ -267,11 +271,12 @@ func scanPgEntries(rows pgx.Rows) ([]*domain.Entry, error) {
 	var entries []*domain.Entry
 	for rows.Next() {
 		var e domain.Entry
-		var status string
-		if err := rows.Scan(&e.ID, &e.Word, &e.Payload, &status, &e.CreatedAt, &e.UpdatedAt, &e.ExpiresAt); err != nil {
+		var status, entryType string
+		if err := rows.Scan(&e.ID, &e.Word, &e.Payload, &status, &entryType, &e.CreatedAt, &e.UpdatedAt, &e.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("scanning entry: %w", err)
 		}
 		e.Status = domain.EntryStatus(status)
+		e.EntryType = domain.EntryType(entryType)
 		entries = append(entries, &e)
 	}
 	return entries, rows.Err()

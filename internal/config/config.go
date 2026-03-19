@@ -16,6 +16,15 @@ type Config struct {
 	Expiration ExpirationConfig `yaml:"expiration"`
 	Logging    LoggingConfig    `yaml:"logging"`
 	Tools      ToolsConfig      `yaml:"tools"`
+	S3         *S3Config        `yaml:"s3"`
+}
+
+type S3Config struct {
+	Endpoint          string `yaml:"endpoint"`
+	Region            string `yaml:"region"`
+	Bucket            string `yaml:"bucket"`
+	PresignTTLMinutes int    `yaml:"presign_ttl_minutes"`
+	MaxFileSizeBytes  int64  `yaml:"max_file_size_bytes"`
 }
 
 type ToolsConfig struct {
@@ -26,6 +35,9 @@ type ToolsConfig struct {
 	RestoreEntry   ToolDesc `yaml:"restore_entry"`
 	ListEntries    ToolDesc `yaml:"list_entries"`
 	DeleteEntry    ToolDesc `yaml:"delete_entry"`
+	SearchWords    ToolDesc `yaml:"search_words"`
+	UploadFile     ToolDesc `yaml:"upload_file"`
+	DownloadFile   ToolDesc `yaml:"download_file"`
 }
 
 type ToolDesc struct {
@@ -56,7 +68,7 @@ var defaultToolsConfig = ToolsConfig{
 		},
 	},
 	SearchEntries: ToolDesc{
-		Description: "Search for entries whose keyword matches a pattern. Uses SQL LIKE syntax: '%' matches any sequence, '_' matches one character. Example: 'rab%' finds 'rabbit', 'rabbit2', 'rabbit3'.",
+		Description: "Search for entries whose keyword matches a pattern. Returns compact summaries (no payload) — use get_entry or get_entry_by_word to retrieve full content. Uses SQL LIKE syntax: '%' matches any sequence, '_' matches one character. Example: 'rab%' finds 'rabbit', 'rabbit2', 'rabbit3'.",
 		Properties: map[string]string{
 			"pattern": "LIKE pattern to match against keywords. Example: '%cat%' finds any word containing 'cat'.",
 			"status":  "Filter by status: 'active', 'expired', or 'all'. Default: 'active'.",
@@ -72,7 +84,7 @@ var defaultToolsConfig = ToolsConfig{
 		},
 	},
 	ListEntries: ToolDesc{
-		Description: "List stored entries with optional filtering by status and pagination.",
+		Description: "List stored entries with optional filtering by status and pagination. Returns compact summaries (no payload) — use get_entry or get_entry_by_word to retrieve full content.",
 		Properties: map[string]string{
 			"status":     "Filter by status: 'active', 'expired', or 'all'. Default: 'active'.",
 			"limit":      "Maximum number of results. Default: 20, max: 100.",
@@ -82,9 +94,33 @@ var defaultToolsConfig = ToolsConfig{
 		},
 	},
 	DeleteEntry: ToolDesc{
-		Description: "Permanently delete a stored entry by its UUID. This action is irreversible.",
+		Description: "Permanently delete a stored entry by its UUID or keyword. Accepts either a UUID or the exact word. This action is irreversible.",
 		Properties: map[string]string{
-			"id": "The UUID of the entry to delete.",
+			"id": "The UUID or keyword of the entry to delete.",
+		},
+	},
+	SearchWords: ToolDesc{
+		Description: "Search keywords matching a pattern. Returns only word names, IDs, and status — no payload content. Uses SQL LIKE syntax: '%' matches any sequence, '_' matches one character. Use this for browsing/discovery; use get_entry or get_entry_by_word to retrieve full content.",
+		Properties: map[string]string{
+			"pattern": "LIKE pattern to match against keywords. Example: '%cat%' finds any word containing 'cat'.",
+			"status":  "Filter by status: 'active', 'expired', or 'all'. Default: 'active'.",
+			"limit":   "Maximum number of results. Default: 20, max: 100.",
+			"offset":  "Pagination offset. Default: 0.",
+		},
+	},
+	UploadFile: ToolDesc{
+		Description: "Upload a file via S3 presigned URL. Returns a presigned PUT URL and a keyword. The file data is NOT sent through this tool — instead, use the returned URL with curl or fetch to PUT the file directly to S3. Example: curl -X PUT -T myfile.pdf '<presigned_url>'. Same collision resolution as store_entry. IMPORTANT: Always tell the user the RETURNED word.",
+		Properties: map[string]string{
+			"word":         "A memorable keyword for this file.",
+			"filename":     "Original filename (e.g., 'report.pdf'). Used as part of the S3 key and returned on download.",
+			"content_type": "Optional MIME type (e.g., 'application/pdf'). Defaults to 'application/octet-stream'.",
+			"ttl_hours":    "Optional. Override default TTL in hours. 0 = never expires.",
+		},
+	},
+	DownloadFile: ToolDesc{
+		Description: "Get a presigned download URL for a file entry. Returns a presigned GET URL, filename, and content type. The file data is NOT sent through this tool — instead, use the returned URL with curl or fetch to GET the file directly from S3. Example: curl -o '<filename>' '<presigned_url>'.",
+		Properties: map[string]string{
+			"word": "The keyword of the file entry to download.",
 		},
 	},
 }
@@ -294,6 +330,42 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("WORDSTORE_LOGGING_FILE"); v != "" {
 		cfg.Logging.File = v
 	}
+
+	// S3 env overrides
+	if v := os.Getenv("WORDSTORE_S3_ENDPOINT"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		cfg.S3.Endpoint = v
+	}
+	if v := os.Getenv("WORDSTORE_S3_REGION"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		cfg.S3.Region = v
+	}
+	if v := os.Getenv("WORDSTORE_S3_BUCKET"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		cfg.S3.Bucket = v
+	}
+	if v := os.Getenv("WORDSTORE_S3_PRESIGN_TTL_MINUTES"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		if m, err := strconv.Atoi(v); err == nil {
+			cfg.S3.PresignTTLMinutes = m
+		}
+	}
+	if v := os.Getenv("WORDSTORE_S3_MAX_FILE_SIZE_BYTES"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		if m, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.S3.MaxFileSizeBytes = m
+		}
+	}
 }
 
 func mergeToolDesc(dst *ToolDesc, def ToolDesc) {
@@ -320,6 +392,9 @@ func applyToolDefaults(cfg *Config) {
 	mergeToolDesc(&cfg.Tools.RestoreEntry, d.RestoreEntry)
 	mergeToolDesc(&cfg.Tools.ListEntries, d.ListEntries)
 	mergeToolDesc(&cfg.Tools.DeleteEntry, d.DeleteEntry)
+	mergeToolDesc(&cfg.Tools.SearchWords, d.SearchWords)
+	mergeToolDesc(&cfg.Tools.UploadFile, d.UploadFile)
+	mergeToolDesc(&cfg.Tools.DownloadFile, d.DownloadFile)
 }
 
 func validate(cfg *Config) error {
@@ -355,6 +430,20 @@ func validate(cfg *Config) error {
 	}
 	if cfg.Expiration.TTLHours < 0 {
 		return fmt.Errorf("expiration.ttl_hours must be >= 0")
+	}
+	if cfg.S3 != nil {
+		if cfg.S3.Bucket == "" {
+			return fmt.Errorf("s3.bucket is required when s3 is configured")
+		}
+		if cfg.S3.Region == "" {
+			return fmt.Errorf("s3.region is required when s3 is configured")
+		}
+		if cfg.S3.PresignTTLMinutes <= 0 {
+			cfg.S3.PresignTTLMinutes = 15
+		}
+		if cfg.S3.MaxFileSizeBytes <= 0 {
+			cfg.S3.MaxFileSizeBytes = 1073741824 // 1GB
+		}
 	}
 	return nil
 }

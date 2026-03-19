@@ -17,6 +17,7 @@ import (
 	"github.com/watchword/watchword/internal/health"
 	mcpserver "github.com/watchword/watchword/internal/mcp"
 	"github.com/watchword/watchword/internal/repository"
+	s3client "github.com/watchword/watchword/internal/s3"
 	"github.com/watchword/watchword/internal/service"
 	"github.com/watchword/watchword/internal/worker"
 )
@@ -81,7 +82,19 @@ func main() {
 	}
 
 	svc := service.NewEntryService(repo, cfg.Expiration.TTLHours, logger)
-	mcpSrv := mcpserver.NewServer(svc, cfg.Tools, logger)
+
+	var fileSvc *service.FileService
+	if cfg.S3 != nil {
+		s3c, err := s3client.NewClient(ctx, cfg.S3)
+		if err != nil {
+			logger.Error("failed to initialize S3 client", "error", err)
+			os.Exit(1)
+		}
+		fileSvc = service.NewFileService(repo, s3c, cfg.Expiration.TTLHours, cfg.S3.MaxFileSizeBytes, logger)
+		logger.Info("S3 file storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
+	}
+
+	mcpSrv := mcpserver.NewServer(svc, fileSvc, cfg.Tools, logger)
 
 	if cfg.Expiration.Enabled {
 		w := worker.NewExpirationWorker(repo, cfg.Expiration.IntervalHours, logger)

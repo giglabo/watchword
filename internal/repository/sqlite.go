@@ -43,7 +43,7 @@ func (r *SQLiteRepo) Migrate(ctx context.Context) error {
 		return fmt.Errorf("creating schema_migrations table: %w", err)
 	}
 
-	migrationFiles := []string{"001_init.sql"}
+	migrationFiles := []string{"001_init.sql", "002_add_entry_type.sql"}
 	for _, name := range migrationFiles {
 		var count int
 		err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, name).Scan(&count)
@@ -85,6 +85,9 @@ func (r *SQLiteRepo) Store(ctx context.Context, entry *domain.Entry) (*domain.En
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 	entry.Status = domain.StatusActive
+	if entry.EntryType == "" {
+		entry.EntryType = domain.EntryTypeText
+	}
 
 	var expiresAt *string
 	if entry.ExpiresAt != nil {
@@ -93,9 +96,9 @@ func (r *SQLiteRepo) Store(ctx context.Context, entry *domain.Entry) (*domain.En
 	}
 
 	_, err := r.execContext(ctx,
-		`INSERT INTO entries (id, word, payload, status, created_at, updated_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		entry.ID.String(), entry.Word, entry.Payload, string(entry.Status),
+		`INSERT INTO entries (id, word, payload, status, entry_type, created_at, updated_at, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.ID.String(), entry.Word, entry.Payload, string(entry.Status), string(entry.EntryType),
 		now.Format(time.RFC3339), now.Format(time.RFC3339), expiresAt,
 	)
 	if err != nil {
@@ -106,14 +109,14 @@ func (r *SQLiteRepo) Store(ctx context.Context, entry *domain.Entry) (*domain.En
 
 func (r *SQLiteRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Entry, error) {
 	row := r.queryRowContext(ctx,
-		`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries WHERE id = ?`,
+		`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries WHERE id = ?`,
 		id.String(),
 	)
 	return scanSQLiteEntry(row)
 }
 
 func (r *SQLiteRepo) GetByWord(ctx context.Context, word string, includeExpired bool) (*domain.Entry, error) {
-	query := `SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries WHERE word = ?`
+	query := `SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries WHERE word = ?`
 	if !includeExpired {
 		query += ` AND status = 'active'`
 	}
@@ -138,7 +141,7 @@ func (r *SQLiteRepo) SearchByLike(ctx context.Context, pattern string, status st
 		return nil, 0, fmt.Errorf("counting entries: %w", err)
 	}
 
-	query := fmt.Sprintf(`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries %s ORDER BY word ASC LIMIT ? OFFSET ?`, where)
+	query := fmt.Sprintf(`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries %s ORDER BY word ASC LIMIT ? OFFSET ?`, where)
 	args = append(args, limit, offset)
 
 	rows, err := r.queryContext(ctx, query, args...)
@@ -174,7 +177,7 @@ func (r *SQLiteRepo) List(ctx context.Context, status string, limit int, offset 
 		return nil, 0, fmt.Errorf("counting entries: %w", err)
 	}
 
-	query := fmt.Sprintf(`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries %s ORDER BY %s %s LIMIT ? OFFSET ?`,
+	query := fmt.Sprintf(`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries %s ORDER BY %s %s LIMIT ? OFFSET ?`,
 		where, sortBy, sortOrder)
 	args = append(args, limit, offset)
 
@@ -293,6 +296,9 @@ func (r *sqliteTxRepo) Store(ctx context.Context, entry *domain.Entry) (*domain.
 	entry.CreatedAt = now
 	entry.UpdatedAt = now
 	entry.Status = domain.StatusActive
+	if entry.EntryType == "" {
+		entry.EntryType = domain.EntryTypeText
+	}
 
 	var expiresAt *string
 	if entry.ExpiresAt != nil {
@@ -301,9 +307,9 @@ func (r *sqliteTxRepo) Store(ctx context.Context, entry *domain.Entry) (*domain.
 	}
 
 	_, err := r.tx.ExecContext(ctx,
-		`INSERT INTO entries (id, word, payload, status, created_at, updated_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		entry.ID.String(), entry.Word, entry.Payload, string(entry.Status),
+		`INSERT INTO entries (id, word, payload, status, entry_type, created_at, updated_at, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		entry.ID.String(), entry.Word, entry.Payload, string(entry.Status), string(entry.EntryType),
 		now.Format(time.RFC3339), now.Format(time.RFC3339), expiresAt,
 	)
 	if err != nil {
@@ -314,14 +320,14 @@ func (r *sqliteTxRepo) Store(ctx context.Context, entry *domain.Entry) (*domain.
 
 func (r *sqliteTxRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Entry, error) {
 	row := r.tx.QueryRowContext(ctx,
-		`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries WHERE id = ?`,
+		`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries WHERE id = ?`,
 		id.String(),
 	)
 	return scanSQLiteEntry(row)
 }
 
 func (r *sqliteTxRepo) GetByWord(ctx context.Context, word string, includeExpired bool) (*domain.Entry, error) {
-	query := `SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries WHERE word = ?`
+	query := `SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries WHERE word = ?`
 	if !includeExpired {
 		query += ` AND status = 'active'`
 	}
@@ -346,7 +352,7 @@ func (r *sqliteTxRepo) SearchByLike(ctx context.Context, pattern string, status 
 		return nil, 0, err
 	}
 
-	query := fmt.Sprintf(`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries %s ORDER BY word ASC LIMIT ? OFFSET ?`, where)
+	query := fmt.Sprintf(`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries %s ORDER BY word ASC LIMIT ? OFFSET ?`, where)
 	args = append(args, limit, offset)
 
 	rows, err := r.tx.QueryContext(ctx, query, args...)
@@ -378,7 +384,7 @@ func (r *sqliteTxRepo) List(ctx context.Context, status string, limit int, offse
 		return nil, 0, err
 	}
 
-	query := fmt.Sprintf(`SELECT id, word, payload, status, created_at, updated_at, expires_at FROM entries %s ORDER BY %s %s LIMIT ? OFFSET ?`,
+	query := fmt.Sprintf(`SELECT id, word, payload, status, entry_type, created_at, updated_at, expires_at FROM entries %s ORDER BY %s %s LIMIT ? OFFSET ?`,
 		where, sortBy, sortOrder)
 	args = append(args, limit, offset)
 
@@ -482,7 +488,8 @@ func scanSQLiteEntry(row scannable) (*domain.Entry, error) {
 	var idStr, status, createdStr, updatedStr string
 	var expiresStr *string
 
-	err := row.Scan(&idStr, &e.Word, &e.Payload, &status, &createdStr, &updatedStr, &expiresStr)
+	var entryType string
+	err := row.Scan(&idStr, &e.Word, &e.Payload, &status, &entryType, &createdStr, &updatedStr, &expiresStr)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, domain.ErrNotFound
@@ -496,6 +503,7 @@ func scanSQLiteEntry(row scannable) (*domain.Entry, error) {
 	}
 	e.ID = id
 	e.Status = domain.EntryStatus(status)
+	e.EntryType = domain.EntryType(entryType)
 
 	if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
 		e.CreatedAt = t
@@ -519,7 +527,8 @@ func scanSQLiteEntries(rows *sql.Rows) ([]*domain.Entry, error) {
 		var idStr, status, createdStr, updatedStr string
 		var expiresStr *string
 
-		if err := rows.Scan(&idStr, &e.Word, &e.Payload, &status, &createdStr, &updatedStr, &expiresStr); err != nil {
+		var entryType string
+		if err := rows.Scan(&idStr, &e.Word, &e.Payload, &status, &entryType, &createdStr, &updatedStr, &expiresStr); err != nil {
 			return nil, fmt.Errorf("scanning entry: %w", err)
 		}
 
@@ -529,6 +538,7 @@ func scanSQLiteEntries(rows *sql.Rows) ([]*domain.Entry, error) {
 		}
 		e.ID = id
 		e.Status = domain.EntryStatus(status)
+		e.EntryType = domain.EntryType(entryType)
 
 		if t, err := time.Parse(time.RFC3339, createdStr); err == nil {
 			e.CreatedAt = t

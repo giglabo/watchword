@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Watchword — an MCP server in Go that stores prompts/data keyed by human-readable words (code words). Supports SQLite and PostgreSQL backends, background expiration, bearer token auth, and 7 MCP tools over stdio/SSE/Streamable HTTP.
+Watchword — an MCP server in Go that stores prompts/data keyed by human-readable words (code words). Supports SQLite and PostgreSQL backends, background expiration, bearer token auth, S3 presigned file upload/download, and 10 MCP tools over stdio/SSE/Streamable HTTP.
 
 ## Build & Test
 
@@ -21,9 +21,10 @@ docker compose up -d    # Run with PostgreSQL + Streamable HTTP (via supergatewa
 - `internal/domain/` — Entry struct, validation, sentinel errors
 - `internal/config/` — YAML + env var config loading
 - `internal/repository/` — Repository interface + SQLite/PostgreSQL implementations
-- `internal/service/` — Business logic (collision resolution, store, restore, search)
+- `internal/service/` — Business logic (collision resolution, store, restore, search, file ops)
+- `internal/s3/` — S3 presigned URL client (aws-sdk-go-v2), Presigner interface
 - `internal/auth/` — Bearer token + JWT/JWKS validation, RFC 9728 Protected Resource Metadata, WWW-Authenticate headers
-- `internal/mcp/` — MCP server setup + tool handlers
+- `internal/mcp/` — MCP server setup + tool handlers (text + file)
 - `internal/worker/` — Background expiration goroutine
 - `migrations/` — Embedded SQL migrations for SQLite and PostgreSQL
 
@@ -34,6 +35,10 @@ docker compose up -d    # Run with PostgreSQL + Streamable HTTP (via supergatewa
 - **Domain errors → tool result errors** (not transport errors) — MCP client gets structured messages
 - **Collision resolution** — base word, then word2..word999, all within a transaction
 - **Auth per-transport** — stdio validates WORDSTORE_AUTH_TOKEN once at startup; SSE uses HTTP middleware
+- **S3 presigned URLs** — file tools generate presigned PUT/GET URLs; MCP server never touches file data. Conditionally registered only when S3 is configured
+- **Compact list/search responses** — `list_entries`, `search_entries`, `search_words` omit payload to reduce token usage; `get_entry`/`get_entry_by_word` return full content
+- **delete_entry accepts UUID or word** — tries UUID parse first, falls back to word lookup
+- **entry_type column** — `text` (default) or `file`; file entries store JSON metadata in payload field
 - **Streamable HTTP via supergateway** — Docker image wraps the stdio binary with [supergateway](https://github.com/supercorp-ai/supergateway) to expose Streamable HTTP on `/mcp`. Uses `--stateful` mode to avoid the child-process OOM leak ([PR #111](https://github.com/supercorp-ai/supergateway/pull/111)). Built from the PR #111 branch for the stateless leak fix as well.
 
 ## MCP Library
