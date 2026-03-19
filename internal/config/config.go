@@ -35,6 +35,7 @@ type ToolsConfig struct {
 	RestoreEntry   ToolDesc `yaml:"restore_entry"`
 	ListEntries    ToolDesc `yaml:"list_entries"`
 	DeleteEntry    ToolDesc `yaml:"delete_entry"`
+	SearchWords    ToolDesc `yaml:"search_words"`
 	UploadFile     ToolDesc `yaml:"upload_file"`
 	DownloadFile   ToolDesc `yaml:"download_file"`
 }
@@ -67,7 +68,7 @@ var defaultToolsConfig = ToolsConfig{
 		},
 	},
 	SearchEntries: ToolDesc{
-		Description: "Search for entries whose keyword matches a pattern. Uses SQL LIKE syntax: '%' matches any sequence, '_' matches one character. Example: 'rab%' finds 'rabbit', 'rabbit2', 'rabbit3'.",
+		Description: "Search for entries whose keyword matches a pattern. Returns compact summaries (no payload) — use get_entry or get_entry_by_word to retrieve full content. Uses SQL LIKE syntax: '%' matches any sequence, '_' matches one character. Example: 'rab%' finds 'rabbit', 'rabbit2', 'rabbit3'.",
 		Properties: map[string]string{
 			"pattern": "LIKE pattern to match against keywords. Example: '%cat%' finds any word containing 'cat'.",
 			"status":  "Filter by status: 'active', 'expired', or 'all'. Default: 'active'.",
@@ -83,7 +84,7 @@ var defaultToolsConfig = ToolsConfig{
 		},
 	},
 	ListEntries: ToolDesc{
-		Description: "List stored entries with optional filtering by status and pagination.",
+		Description: "List stored entries with optional filtering by status and pagination. Returns compact summaries (no payload) — use get_entry or get_entry_by_word to retrieve full content.",
 		Properties: map[string]string{
 			"status":     "Filter by status: 'active', 'expired', or 'all'. Default: 'active'.",
 			"limit":      "Maximum number of results. Default: 20, max: 100.",
@@ -93,9 +94,18 @@ var defaultToolsConfig = ToolsConfig{
 		},
 	},
 	DeleteEntry: ToolDesc{
-		Description: "Permanently delete a stored entry by its UUID. This action is irreversible.",
+		Description: "Permanently delete a stored entry by its UUID or keyword. Accepts either a UUID or the exact word. This action is irreversible.",
 		Properties: map[string]string{
-			"id": "The UUID of the entry to delete.",
+			"id": "The UUID or keyword of the entry to delete.",
+		},
+	},
+	SearchWords: ToolDesc{
+		Description: "Search keywords matching a pattern. Returns only word names, IDs, and status — no payload content. Uses SQL LIKE syntax: '%' matches any sequence, '_' matches one character. Use this for browsing/discovery; use get_entry or get_entry_by_word to retrieve full content.",
+		Properties: map[string]string{
+			"pattern": "LIKE pattern to match against keywords. Example: '%cat%' finds any word containing 'cat'.",
+			"status":  "Filter by status: 'active', 'expired', or 'all'. Default: 'active'.",
+			"limit":   "Maximum number of results. Default: 20, max: 100.",
+			"offset":  "Pagination offset. Default: 0.",
 		},
 	},
 	UploadFile: ToolDesc{
@@ -382,6 +392,7 @@ func applyToolDefaults(cfg *Config) {
 	mergeToolDesc(&cfg.Tools.RestoreEntry, d.RestoreEntry)
 	mergeToolDesc(&cfg.Tools.ListEntries, d.ListEntries)
 	mergeToolDesc(&cfg.Tools.DeleteEntry, d.DeleteEntry)
+	mergeToolDesc(&cfg.Tools.SearchWords, d.SearchWords)
 	mergeToolDesc(&cfg.Tools.UploadFile, d.UploadFile)
 	mergeToolDesc(&cfg.Tools.DownloadFile, d.DownloadFile)
 }

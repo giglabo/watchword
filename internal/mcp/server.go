@@ -34,6 +34,9 @@ var propTypes = map[string]map[string]string{
 	"delete_entry": {
 		"id": "string",
 	},
+	"search_words": {
+		"pattern": "string", "status": "string", "limit": "integer", "offset": "integer",
+	},
 	"upload_file": {
 		"word": "string", "filename": "string", "content_type": "string", "ttl_hours": "integer",
 	},
@@ -129,6 +132,16 @@ func NewServer(svc *service.EntryService, fileSvc *service.FileService, tools co
 			Required:   []string{"id"},
 		},
 	}, h.DeleteEntry)
+
+	s.AddTool(mcp.Tool{
+		Name:        "search_words",
+		Description: tools.SearchWords.Description,
+		InputSchema: mcp.ToolInputSchema{
+			Type:       "object",
+			Properties: buildProps("search_words", tools.SearchWords.Properties),
+			Required:   []string{"pattern"},
+		},
+	}, h.SearchWords)
 
 	// Conditionally register file tools when S3 is configured
 	if fileSvc != nil {

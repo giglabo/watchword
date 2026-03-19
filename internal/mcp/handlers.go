@@ -134,7 +134,7 @@ func (h *Handlers) SearchEntries(ctx context.Context, req mcp.CallToolRequest) (
 	h.logger.Debug("search_entries success", "pattern", pattern, "total", total, "returned", len(entries))
 
 	resp := map[string]interface{}{
-		"entries": entries,
+		"entries": compactEntries(entries),
 		"total":   total,
 		"limit":   limit,
 		"offset":  offset,
@@ -197,10 +197,45 @@ func (h *Handlers) ListEntries(ctx context.Context, req mcp.CallToolRequest) (*m
 	h.logger.Debug("list_entries success", "total", total, "returned", len(entries))
 
 	resp := map[string]interface{}{
-		"entries": entries,
+		"entries": compactEntries(entries),
 		"total":   total,
 		"limit":   limit,
 		"offset":  offset,
+	}
+	return marshalResult(resp)
+}
+
+func (h *Handlers) SearchWords(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	pattern := req.GetString("pattern", "")
+	status := req.GetString("status", "")
+	limit := req.GetInt("limit", 20)
+	offset := req.GetInt("offset", 0)
+
+	h.logger.Debug("search_words called", "pattern", pattern, "status", status, "limit", limit, "offset", offset)
+
+	entries, total, err := h.svc.SearchEntries(ctx, pattern, status, limit, offset)
+	if err != nil {
+		h.logger.Warn("search_words failed", "pattern", pattern, "error", err)
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	h.logger.Debug("search_words success", "pattern", pattern, "total", total, "returned", len(entries))
+
+	words := make([]map[string]interface{}, 0, len(entries))
+	for _, e := range entries {
+		words = append(words, map[string]interface{}{
+			"word":       e.Word,
+			"id":         e.ID.String(),
+			"status":     e.Status,
+			"entry_type": e.EntryType,
+		})
+	}
+
+	resp := map[string]interface{}{
+		"words":  words,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
 	}
 	return marshalResult(resp)
 }
@@ -221,6 +256,30 @@ func (h *Handlers) DeleteEntry(ctx context.Context, req mcp.CallToolRequest) (*m
 		"deleted": true,
 		"id":      id,
 	})
+}
+
+// compactEntries returns entry summaries without payload to reduce token usage.
+func compactEntries(entries []*domain.Entry) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(entries))
+	for _, e := range entries {
+		item := map[string]interface{}{
+			"id":         e.ID.String(),
+			"word":       e.Word,
+			"status":     e.Status,
+			"entry_type": e.EntryType,
+			"created_at": e.CreatedAt,
+			"updated_at": e.UpdatedAt,
+		}
+		if e.ExpiresAt != nil {
+			item["expires_at"] = e.ExpiresAt
+		}
+		if e.EntryType == domain.EntryTypeText {
+			// Include payload length as a hint
+			item["payload_length"] = len(e.Payload)
+		}
+		result = append(result, item)
+	}
+	return result
 }
 
 func marshalResult(v interface{}) (*mcp.CallToolResult, error) {
