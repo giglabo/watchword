@@ -12,20 +12,31 @@ import (
 	"github.com/watchword/watchword/internal/domain"
 )
 
-// SignURL generates an HMAC-signed download URL.
-// Format: <baseURL>/dl?entry=<id>&file=<name>&exp=<unix>&sig=<hex-hmac>
-func SignURL(baseURL, secret, entryID, filename string, ttl time.Duration) string {
+// SignURL generates an HMAC-signed proxy URL for the given path.
+// Format: <baseURL>/<path>?entry=<id>&file=<name>&exp=<unix>&sig=<hex-hmac>
+func SignURL(baseURL, path, secret, entryID, filename string, ttl time.Duration) string {
 	exp := time.Now().Add(ttl).Unix()
 	msg := canonicalMessage(entryID, filename, exp)
 	sig := computeHMAC(secret, msg)
 
-	return fmt.Sprintf("%s/dl?entry=%s&file=%s&exp=%d&sig=%s",
+	return fmt.Sprintf("%s/%s?entry=%s&file=%s&exp=%d&sig=%s",
 		baseURL,
+		path,
 		url.QueryEscape(entryID),
 		url.QueryEscape(filename),
 		exp,
 		sig,
 	)
+}
+
+// SignDownloadURL generates an HMAC-signed download URL (/dl).
+func SignDownloadURL(baseURL, secret, entryID, filename string, ttl time.Duration) string {
+	return SignURL(baseURL, "dl", secret, entryID, filename, ttl)
+}
+
+// SignUploadURL generates an HMAC-signed upload URL (/ul).
+func SignUploadURL(baseURL, secret, entryID, filename string, ttl time.Duration) string {
+	return SignURL(baseURL, "ul", secret, entryID, filename, ttl)
 }
 
 // ValidateSignature checks the HMAC signature and expiry of URL parameters.

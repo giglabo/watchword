@@ -298,8 +298,11 @@ func registerOAuthMetadata(mux *http.ServeMux, cfg *config.Config) {
 
 func registerProxyHandler(outerMux *http.ServeMux, cfg *config.Config, s3c s3client.Streamer, repo repository.Repository, logger *slog.Logger) {
 	if cfg.S3 != nil && cfg.S3.Proxy != nil && s3c != nil {
-		proxyHandler := proxy.NewHandler(cfg.S3.Proxy.HMACSecret, s3c, repo, logger)
-		outerMux.Handle("/dl", proxyHandler)
+		dlHandler := proxy.NewHandler(cfg.S3.Proxy.HMACSecret, s3c, repo, logger)
+		outerMux.Handle("/dl", dlHandler)
+
+		ulHandler := proxy.NewUploadHandler(cfg.S3.Proxy.HMACSecret, s3c, repo, cfg.S3.MaxFileSizeBytes, logger)
+		outerMux.Handle("/ul", ulHandler)
 	}
 }
 

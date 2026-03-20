@@ -14,7 +14,7 @@ func TestSignAndValidateRoundTrip(t *testing.T) {
 	filename := "report.pdf"
 	ttl := 5 * time.Minute
 
-	rawURL := SignURL(baseURL, secret, entryID, filename, ttl)
+	rawURL := SignDownloadURL(baseURL, secret, entryID, filename, ttl)
 
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestValidateSignature_TamperedSig(t *testing.T) {
 	entryID := "550e8400-e29b-41d4-a716-446655440000"
 	filename := "report.pdf"
 
-	rawURL := SignURL(baseURL, secret, entryID, filename, 5*time.Minute)
+	rawURL := SignDownloadURL(baseURL, secret, entryID, filename, 5*time.Minute)
 	parsed, _ := url.Parse(rawURL)
 	q := parsed.Query()
 	q.Set("sig", "deadbeef0000000000000000000000000000000000000000000000000000000000")
@@ -82,7 +82,7 @@ func TestValidateSignature_TamperedParams(t *testing.T) {
 	entryID := "550e8400-e29b-41d4-a716-446655440000"
 	filename := "report.pdf"
 
-	rawURL := SignURL(baseURL, secret, entryID, filename, 5*time.Minute)
+	rawURL := SignDownloadURL(baseURL, secret, entryID, filename, 5*time.Minute)
 	parsed, _ := url.Parse(rawURL)
 	q := parsed.Query()
 	// Tamper with entry ID

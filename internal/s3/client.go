@@ -23,9 +23,10 @@ type Presigner interface {
 	DeleteObject(ctx context.Context, key string) error
 }
 
-// Streamer retrieves S3 objects for proxied downloads.
+// Streamer handles direct S3 object operations for proxied uploads and downloads.
 type Streamer interface {
 	GetObject(ctx context.Context, key string) (body io.ReadCloser, contentType string, contentLength int64, err error)
+	PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error
 }
 
 type Client struct {
@@ -98,6 +99,24 @@ func (c *Client) PresignPUT(ctx context.Context, key string, contentType string,
 		return "", fmt.Errorf("presigning PUT: %w", err)
 	}
 	return result.URL, nil
+}
+
+func (c *Client) PutObject(ctx context.Context, key string, body io.Reader, contentType string, contentLength int64) error {
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(c.bucket),
+		Key:         aws.String(key),
+		Body:        body,
+		ContentType: aws.String(contentType),
+	}
+	if contentLength > 0 {
+		input.ContentLength = aws.Int64(contentLength)
+	}
+
+	_, err := c.s3Client.PutObject(ctx, input)
+	if err != nil {
+		return fmt.Errorf("putting S3 object %s: %w", key, err)
+	}
+	return nil
 }
 
 func (c *Client) GetObject(ctx context.Context, key string) (io.ReadCloser, string, int64, error) {
