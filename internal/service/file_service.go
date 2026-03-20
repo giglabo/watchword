@@ -13,9 +13,10 @@ import (
 	s3client "github.com/watchword/watchword/internal/s3"
 )
 
-// ProxyURLSigner generates HMAC-signed proxy download URLs.
+// ProxyURLSigner generates HMAC-signed proxy URLs for uploads and downloads.
 type ProxyURLSigner interface {
-	Sign(entryID, filename string) string
+	SignDownload(entryID, filename string) string
+	SignUpload(entryID, filename string) string
 }
 
 type FileService struct {
@@ -46,6 +47,7 @@ type UploadResult struct {
 	Word              string `json:"word"`
 	ID                string `json:"id"`
 	UploadURL         string `json:"upload_url"`
+	ProxyUploadURL    string `json:"proxy_upload_url,omitempty"`
 	Filename          string `json:"filename"`
 	ContentType       string `json:"content_type"`
 	MaxSize           int64  `json:"max_size_bytes"`
@@ -151,6 +153,10 @@ func (s *FileService) UploadFile(ctx context.Context, word string, filename stri
 			CollisionResolved: collision,
 			Hint:              fmt.Sprintf("Upload your file with: curl -X PUT -H 'Content-Type: %s' -T '%s' '%s'", contentType, filename, uploadURL),
 		}
+		if s.proxySigner != nil {
+			result.ProxyUploadURL = s.proxySigner.SignUpload(created.ID.String(), filename)
+			result.Hint = fmt.Sprintf("Upload your file with: curl -X PUT -H 'Content-Type: %s' -T '%s' '%s' (or use proxy_upload_url if the presigned URL is not accessible)", contentType, filename, result.ProxyUploadURL)
+		}
 		if expiresAt != nil {
 			result.ExpiresAt = expiresAt.Format(time.RFC3339)
 		}
@@ -217,7 +223,7 @@ func (s *FileService) DownloadFile(ctx context.Context, word string) (*DownloadR
 	}
 
 	if s.proxySigner != nil {
-		result.ProxyURL = s.proxySigner.Sign(entry.ID.String(), meta.Filename)
+		result.ProxyURL = s.proxySigner.SignDownload(entry.ID.String(), meta.Filename)
 		result.Hint = fmt.Sprintf("Download with: curl -o '%s' '%s' (or use the proxy_url if the presigned URL is not accessible)", meta.Filename, result.ProxyURL)
 	}
 

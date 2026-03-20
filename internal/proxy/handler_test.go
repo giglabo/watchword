@@ -83,6 +83,10 @@ func (m *mockStreamer) GetObject(_ context.Context, _ string) (io.ReadCloser, st
 	return io.NopCloser(strings.NewReader(m.body)), m.contentType, m.size, nil
 }
 
+func (m *mockStreamer) PutObject(_ context.Context, _ string, _ io.Reader, _ string, _ int64) error {
+	return nil
+}
+
 // --- tests ---
 
 func TestHandler_Success(t *testing.T) {
@@ -106,7 +110,7 @@ func TestHandler_Success(t *testing.T) {
 
 	handler := NewHandler(secret, streamer, repo, slog.Default())
 
-	signedURL := SignURL("http://localhost", secret, entryID.String(), "doc.pdf", 5*time.Minute)
+	signedURL := SignDownloadURL("http://localhost", secret, entryID.String(), "doc.pdf", 5*time.Minute)
 
 	req := httptest.NewRequest(http.MethodGet, signedURL, nil)
 	rec := httptest.NewRecorder()
@@ -179,7 +183,7 @@ func TestHandler_EntryNotFound(t *testing.T) {
 	repo := &mockRepo{err: domain.ErrNotFound}
 	handler := NewHandler(secret, nil, repo, slog.Default())
 
-	signedURL := SignURL("http://localhost", secret, entryID.String(), "doc.pdf", 5*time.Minute)
+	signedURL := SignDownloadURL("http://localhost", secret, entryID.String(), "doc.pdf", 5*time.Minute)
 	req := httptest.NewRequest(http.MethodGet, signedURL, nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
