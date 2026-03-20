@@ -17,4 +17,6 @@ var (
 	ErrInvalidFilename        = errors.New("invalid filename: must be 1-255 characters, no control characters or path separators")
 	ErrNotAFileEntry          = errors.New("this entry is not a file entry; use get_entry or get_entry_by_word instead")
 	ErrS3NotConfigured        = errors.New("S3 storage is not configured on this server")
+	ErrProxyURLExpired        = errors.New("proxy download URL has expired")
+	ErrProxyURLInvalid        = errors.New("proxy download URL is invalid")
 )

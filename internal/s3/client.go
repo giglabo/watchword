@@ -3,6 +3,7 @@ package s3
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -20,6 +21,11 @@ type Presigner interface {
 	PresignPUT(ctx context.Context, key string, contentType string, maxSize int64) (string, error)
 	PresignGET(ctx context.Context, key string, downloadFilename string) (string, error)
 	DeleteObject(ctx context.Context, key string) error
+}
+
+// Streamer retrieves S3 objects for proxied downloads.
+type Streamer interface {
+	GetObject(ctx context.Context, key string) (body io.ReadCloser, contentType string, contentLength int64, err error)
 }
 
 type Client struct {
@@ -92,6 +98,27 @@ func (c *Client) PresignPUT(ctx context.Context, key string, contentType string,
 		return "", fmt.Errorf("presigning PUT: %w", err)
 	}
 	return result.URL, nil
+}
+
+func (c *Client) GetObject(ctx context.Context, key string) (io.ReadCloser, string, int64, error) {
+	result, err := c.s3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("getting S3 object %s: %w", key, err)
+	}
+
+	contentType := ""
+	if result.ContentType != nil {
+		contentType = *result.ContentType
+	}
+	var contentLength int64
+	if result.ContentLength != nil {
+		contentLength = *result.ContentLength
+	}
+
+	return result.Body, contentType, contentLength, nil
 }
 
 func (c *Client) PresignGET(ctx context.Context, key string, downloadFilename string) (string, error) {

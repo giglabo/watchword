@@ -20,11 +20,19 @@ type Config struct {
 }
 
 type S3Config struct {
-	Endpoint          string `yaml:"endpoint"`
-	Region            string `yaml:"region"`
-	Bucket            string `yaml:"bucket"`
-	PresignTTLMinutes int    `yaml:"presign_ttl_minutes"`
-	MaxFileSizeBytes  int64  `yaml:"max_file_size_bytes"`
+	Endpoint          string       `yaml:"endpoint"`
+	Region            string       `yaml:"region"`
+	Bucket            string       `yaml:"bucket"`
+	PresignTTLMinutes int          `yaml:"presign_ttl_minutes"`
+	MaxFileSizeBytes  int64        `yaml:"max_file_size_bytes"`
+	Proxy             *ProxyConfig `yaml:"proxy"`
+}
+
+type ProxyConfig struct {
+	HMACSecret          string `yaml:"hmac_secret"`
+	BaseURL             string `yaml:"base_url"`
+	URLTTLMinutes       int    `yaml:"url_ttl_minutes"`
+	HistoryRetentionDays int   `yaml:"history_retention_days"`
 }
 
 type ToolsConfig struct {
@@ -366,6 +374,48 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.S3.MaxFileSizeBytes = m
 		}
 	}
+
+	// Proxy env overrides
+	if v := os.Getenv("WORDSTORE_PROXY_HMAC_SECRET"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		if cfg.S3.Proxy == nil {
+			cfg.S3.Proxy = &ProxyConfig{}
+		}
+		cfg.S3.Proxy.HMACSecret = v
+	}
+	if v := os.Getenv("WORDSTORE_PROXY_BASE_URL"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		if cfg.S3.Proxy == nil {
+			cfg.S3.Proxy = &ProxyConfig{}
+		}
+		cfg.S3.Proxy.BaseURL = v
+	}
+	if v := os.Getenv("WORDSTORE_PROXY_URL_TTL_MINUTES"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		if cfg.S3.Proxy == nil {
+			cfg.S3.Proxy = &ProxyConfig{}
+		}
+		if m, err := strconv.Atoi(v); err == nil {
+			cfg.S3.Proxy.URLTTLMinutes = m
+		}
+	}
+	if v := os.Getenv("WORDSTORE_PROXY_HISTORY_RETENTION_DAYS"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		if cfg.S3.Proxy == nil {
+			cfg.S3.Proxy = &ProxyConfig{}
+		}
+		if d, err := strconv.Atoi(v); err == nil {
+			cfg.S3.Proxy.HistoryRetentionDays = d
+		}
+	}
 }
 
 func mergeToolDesc(dst *ToolDesc, def ToolDesc) {
@@ -443,6 +493,20 @@ func validate(cfg *Config) error {
 		}
 		if cfg.S3.MaxFileSizeBytes <= 0 {
 			cfg.S3.MaxFileSizeBytes = 1073741824 // 1GB
+		}
+		if p := cfg.S3.Proxy; p != nil {
+			if p.HMACSecret == "" {
+				return fmt.Errorf("s3.proxy.hmac_secret is required when proxy is configured")
+			}
+			if p.BaseURL == "" {
+				return fmt.Errorf("s3.proxy.base_url is required when proxy is configured")
+			}
+			if p.URLTTLMinutes <= 0 {
+				p.URLTTLMinutes = 5
+			}
+			if p.HistoryRetentionDays < 0 {
+				p.HistoryRetentionDays = 90
+			}
 		}
 	}
 	return nil
