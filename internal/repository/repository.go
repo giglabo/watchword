@@ -18,6 +18,8 @@ type Repository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	MarkExpiredBatch(ctx context.Context, batchSize int) (int, error)
 	WordExistsActive(ctx context.Context, word string) (bool, error)
+	RecordDownload(ctx context.Context, entryID uuid.UUID, word, filename, clientIP, userAgent string) error
+	CleanDownloadHistory(ctx context.Context, olderThan time.Time) (int, error)
 	WithTx(ctx context.Context, fn func(Repository) error) error
 	Ping(ctx context.Context) error
 	Migrate(ctx context.Context) error

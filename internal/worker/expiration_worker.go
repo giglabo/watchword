@@ -11,16 +11,18 @@ import (
 const batchSize = 500
 
 type ExpirationWorker struct {
-	repo     repository.Repository
-	interval time.Duration
-	logger   *slog.Logger
+	repo                 repository.Repository
+	interval             time.Duration
+	historyRetentionDays int
+	logger               *slog.Logger
 }
 
-func NewExpirationWorker(repo repository.Repository, intervalHours int, logger *slog.Logger) *ExpirationWorker {
+func NewExpirationWorker(repo repository.Repository, intervalHours int, historyRetentionDays int, logger *slog.Logger) *ExpirationWorker {
 	return &ExpirationWorker{
-		repo:     repo,
-		interval: time.Duration(intervalHours) * time.Hour,
-		logger:   logger,
+		repo:                 repo,
+		interval:             time.Duration(intervalHours) * time.Hour,
+		historyRetentionDays: historyRetentionDays,
+		logger:               logger,
 	}
 }
 
@@ -85,5 +87,16 @@ func (w *ExpirationWorker) runWithRetry(ctx context.Context) {
 
 	if totalExpired > 0 {
 		w.logger.Info("expiration worker completed", "expired_count", totalExpired)
+	}
+
+	// Clean up old download history
+	if w.historyRetentionDays > 0 {
+		cutoff := time.Now().UTC().AddDate(0, 0, -w.historyRetentionDays)
+		cleaned, err := w.repo.CleanDownloadHistory(ctx, cutoff)
+		if err != nil {
+			w.logger.Error("failed to clean download history", "error", err)
+		} else if cleaned > 0 {
+			w.logger.Info("cleaned download history", "deleted_count", cleaned)
+		}
 	}
 }

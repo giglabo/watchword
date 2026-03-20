@@ -48,7 +48,7 @@ func (r *PostgresRepo) Migrate(ctx context.Context) error {
 		return fmt.Errorf("creating schema_migrations table: %w", err)
 	}
 
-	migrationFiles := []string{"001_init.sql", "002_add_entry_type.sql"}
+	migrationFiles := []string{"001_init.sql", "002_add_entry_type.sql", "003_add_download_history.sql"}
 	for _, name := range migrationFiles {
 		var count int
 		err := r.q.QueryRow(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = $1`, name).Scan(&count)
@@ -226,6 +226,25 @@ func (r *PostgresRepo) MarkExpiredBatch(ctx context.Context, batchSize int) (int
 	)
 	if err != nil {
 		return 0, fmt.Errorf("marking expired: %w", err)
+	}
+	return int(ct.RowsAffected()), nil
+}
+
+func (r *PostgresRepo) RecordDownload(ctx context.Context, entryID uuid.UUID, word, filename, clientIP, userAgent string) error {
+	_, err := r.q.Exec(ctx,
+		`INSERT INTO download_history (entry_id, word, filename, requested_at, client_ip, user_agent) VALUES ($1, $2, $3, NOW(), $4, $5)`,
+		entryID, word, filename, clientIP, userAgent,
+	)
+	if err != nil {
+		return fmt.Errorf("recording download: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepo) CleanDownloadHistory(ctx context.Context, olderThan time.Time) (int, error) {
+	ct, err := r.q.Exec(ctx, `DELETE FROM download_history WHERE requested_at < $1`, olderThan)
+	if err != nil {
+		return 0, fmt.Errorf("cleaning download history: %w", err)
 	}
 	return int(ct.RowsAffected()), nil
 }

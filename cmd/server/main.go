@@ -16,6 +16,7 @@ import (
 	"github.com/watchword/watchword/internal/config"
 	"github.com/watchword/watchword/internal/health"
 	mcpserver "github.com/watchword/watchword/internal/mcp"
+	"github.com/watchword/watchword/internal/proxy"
 	"github.com/watchword/watchword/internal/repository"
 	s3client "github.com/watchword/watchword/internal/s3"
 	"github.com/watchword/watchword/internal/service"
@@ -84,20 +85,32 @@ func main() {
 	svc := service.NewEntryService(repo, cfg.Expiration.TTLHours, logger)
 
 	var fileSvc *service.FileService
+	var s3c *s3client.Client
 	if cfg.S3 != nil {
-		s3c, err := s3client.NewClient(ctx, cfg.S3)
+		var err error
+		s3c, err = s3client.NewClient(ctx, cfg.S3)
 		if err != nil {
 			logger.Error("failed to initialize S3 client", "error", err)
 			os.Exit(1)
 		}
 		fileSvc = service.NewFileService(repo, s3c, cfg.Expiration.TTLHours, cfg.S3.MaxFileSizeBytes, logger)
 		logger.Info("S3 file storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
+
+		if cfg.S3.Proxy != nil {
+			signer := proxy.NewURLSigner(cfg.S3.Proxy.BaseURL, cfg.S3.Proxy.HMACSecret, cfg.S3.Proxy.URLTTLMinutes)
+			fileSvc.SetProxySigner(signer)
+			logger.Info("proxy download enabled", "base_url", cfg.S3.Proxy.BaseURL, "ttl_minutes", cfg.S3.Proxy.URLTTLMinutes)
+		}
 	}
 
 	mcpSrv := mcpserver.NewServer(svc, fileSvc, cfg.Tools, logger)
 
 	if cfg.Expiration.Enabled {
-		w := worker.NewExpirationWorker(repo, cfg.Expiration.IntervalHours, logger)
+		historyRetention := 90 // default
+		if cfg.S3 != nil && cfg.S3.Proxy != nil {
+			historyRetention = cfg.S3.Proxy.HistoryRetentionDays
+		}
+		w := worker.NewExpirationWorker(repo, cfg.Expiration.IntervalHours, historyRetention, logger)
 		go w.Start(ctx)
 		logger.Info("expiration worker started", "interval_hours", cfg.Expiration.IntervalHours)
 	}
@@ -119,13 +132,15 @@ func main() {
 			server.WithSSEEndpoint("/sse"),
 			server.WithBaseURL(fmt.Sprintf("http://localhost:%d", cfg.Server.SSEPort)),
 		)
-		mux := http.NewServeMux()
-		mux.Handle("/sse", sseSrv.SSEHandler())
-		mux.Handle("/message", sseSrv.MessageHandler())
-		registerOAuthMetadata(mux, cfg)
-		handler := wrapWithAuth(mux, authenticator, cfg)
+		innerMux := http.NewServeMux()
+		innerMux.Handle("/sse", sseSrv.SSEHandler())
+		innerMux.Handle("/message", sseSrv.MessageHandler())
+		registerOAuthMetadata(innerMux, cfg)
+		outerMux := http.NewServeMux()
+		registerProxyHandler(outerMux, cfg, s3c, repo, logger)
+		outerMux.Handle("/", wrapWithAuth(innerMux, authenticator, cfg))
 		addr := fmt.Sprintf(":%d", cfg.Server.SSEPort)
-		httpSrv := &http.Server{Addr: addr, Handler: handler}
+		httpSrv := &http.Server{Addr: addr, Handler: outerMux}
 		go func() {
 			<-ctx.Done()
 			httpSrv.Shutdown(context.Background())
@@ -136,12 +151,14 @@ func main() {
 			os.Exit(1)
 		}
 	case "streamable-http":
-		mux := http.NewServeMux()
-		mux.Handle("/mcp", server.NewStreamableHTTPServer(mcpSrv))
-		registerOAuthMetadata(mux, cfg)
-		handler := wrapWithAuth(mux, authenticator, cfg)
+		innerMux := http.NewServeMux()
+		innerMux.Handle("/mcp", server.NewStreamableHTTPServer(mcpSrv))
+		registerOAuthMetadata(innerMux, cfg)
+		outerMux := http.NewServeMux()
+		registerProxyHandler(outerMux, cfg, s3c, repo, logger)
+		outerMux.Handle("/", wrapWithAuth(innerMux, authenticator, cfg))
 		addr := fmt.Sprintf(":%d", cfg.Server.HTTPPort)
-		httpSrv := &http.Server{Addr: addr, Handler: handler}
+		httpSrv := &http.Server{Addr: addr, Handler: outerMux}
 		go func() {
 			<-ctx.Done()
 			httpSrv.Shutdown(context.Background())
@@ -153,19 +170,21 @@ func main() {
 		}
 	case "http":
 		// Serve both SSE and Streamable HTTP on the same port
-		mux := http.NewServeMux()
-		mux.Handle("/mcp", server.NewStreamableHTTPServer(mcpSrv))
+		innerMux := http.NewServeMux()
+		innerMux.Handle("/mcp", server.NewStreamableHTTPServer(mcpSrv))
 		sseSrv := server.NewSSEServer(mcpSrv,
 			server.WithSSEEndpoint("/sse"),
 			server.WithBaseURL(fmt.Sprintf("http://localhost:%d", cfg.Server.HTTPPort)),
 		)
-		mux.Handle("/sse", sseSrv.SSEHandler())
-		mux.Handle("/message", sseSrv.MessageHandler())
-		registerOAuthMetadata(mux, cfg)
-		handler := wrapWithAuth(mux, authenticator, cfg)
+		innerMux.Handle("/sse", sseSrv.SSEHandler())
+		innerMux.Handle("/message", sseSrv.MessageHandler())
+		registerOAuthMetadata(innerMux, cfg)
+		outerMux := http.NewServeMux()
+		registerProxyHandler(outerMux, cfg, s3c, repo, logger)
+		outerMux.Handle("/", wrapWithAuth(innerMux, authenticator, cfg))
 		httpSrv := &http.Server{
 			Addr:    fmt.Sprintf(":%d", cfg.Server.HTTPPort),
-			Handler: handler,
+			Handler: outerMux,
 		}
 		go func() {
 			<-ctx.Done()
@@ -274,6 +293,13 @@ func registerOAuthMetadata(mux *http.ServeMux, cfg *config.Config) {
 	if cfg.Auth.JWT != nil && cfg.Auth.OAuthMetadata != nil {
 		mux.Handle("/.well-known/oauth-authorization-server",
 			auth.OAuthMetadataHandler(cfg.Auth.JWT.JWKSURL, cfg.Auth.JWT.Issuer, cfg.Auth.OAuthMetadata))
+	}
+}
+
+func registerProxyHandler(outerMux *http.ServeMux, cfg *config.Config, s3c s3client.Streamer, repo repository.Repository, logger *slog.Logger) {
+	if cfg.S3 != nil && cfg.S3.Proxy != nil && s3c != nil {
+		proxyHandler := proxy.NewHandler(cfg.S3.Proxy.HMACSecret, s3c, repo, logger)
+		outerMux.Handle("/dl", proxyHandler)
 	}
 }
 

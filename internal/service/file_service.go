@@ -13,12 +13,23 @@ import (
 	s3client "github.com/watchword/watchword/internal/s3"
 )
 
+// ProxyURLSigner generates HMAC-signed proxy download URLs.
+type ProxyURLSigner interface {
+	Sign(entryID, filename string) string
+}
+
 type FileService struct {
 	repo         repository.Repository
 	presigner    s3client.Presigner
+	proxySigner  ProxyURLSigner
 	defaultTTL   int // hours
 	maxFileSize  int64
 	logger       *slog.Logger
+}
+
+// SetProxySigner enables proxy URL generation alongside presigned URLs.
+func (s *FileService) SetProxySigner(signer ProxyURLSigner) {
+	s.proxySigner = signer
 }
 
 func NewFileService(repo repository.Repository, presigner s3client.Presigner, defaultTTLHours int, maxFileSize int64, logger *slog.Logger) *FileService {
@@ -47,6 +58,7 @@ type UploadResult struct {
 type DownloadResult struct {
 	Word        string `json:"word"`
 	DownloadURL string `json:"download_url"`
+	ProxyURL    string `json:"proxy_url,omitempty"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Hint        string `json:"hint"`
@@ -196,11 +208,18 @@ func (s *FileService) DownloadFile(ctx context.Context, word string) (*DownloadR
 		return nil, fmt.Errorf("generating download URL: %w", err)
 	}
 
-	return &DownloadResult{
+	result := &DownloadResult{
 		Word:        entry.Word,
 		DownloadURL: downloadURL,
 		Filename:    meta.Filename,
 		ContentType: meta.ContentType,
 		Hint:        fmt.Sprintf("Download with: curl -o '%s' '%s'", meta.Filename, downloadURL),
-	}, nil
+	}
+
+	if s.proxySigner != nil {
+		result.ProxyURL = s.proxySigner.Sign(entry.ID.String(), meta.Filename)
+		result.Hint = fmt.Sprintf("Download with: curl -o '%s' '%s' (or use the proxy_url if the presigned URL is not accessible)", meta.Filename, result.ProxyURL)
+	}
+
+	return result, nil
 }

@@ -43,7 +43,7 @@ func (r *SQLiteRepo) Migrate(ctx context.Context) error {
 		return fmt.Errorf("creating schema_migrations table: %w", err)
 	}
 
-	migrationFiles := []string{"001_init.sql", "002_add_entry_type.sql"}
+	migrationFiles := []string{"001_init.sql", "002_add_entry_type.sql", "003_add_download_history.sql"}
 	for _, name := range migrationFiles {
 		var count int
 		err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, name).Scan(&count)
@@ -251,6 +251,28 @@ func (r *SQLiteRepo) MarkExpiredBatch(ctx context.Context, batchSize int) (int, 
 	return int(rows), err
 }
 
+func (r *SQLiteRepo) RecordDownload(ctx context.Context, entryID uuid.UUID, word, filename, clientIP, userAgent string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := r.execContext(ctx,
+		`INSERT INTO download_history (entry_id, word, filename, requested_at, client_ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)`,
+		entryID.String(), word, filename, now, clientIP, userAgent,
+	)
+	if err != nil {
+		return fmt.Errorf("recording download: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteRepo) CleanDownloadHistory(ctx context.Context, olderThan time.Time) (int, error) {
+	cutoff := olderThan.UTC().Format(time.RFC3339)
+	result, err := r.execContext(ctx, `DELETE FROM download_history WHERE requested_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("cleaning download history: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	return int(rows), err
+}
+
 func (r *SQLiteRepo) WordExistsActive(ctx context.Context, word string) (bool, error) {
 	var count int
 	err := r.queryRowContext(ctx, `SELECT COUNT(*) FROM entries WHERE word = ? AND status = 'active'`, word).Scan(&count)
@@ -448,6 +470,25 @@ func (r *sqliteTxRepo) MarkExpiredBatch(ctx context.Context, batchSize int) (int
 			LIMIT ?
 		 )`, now, now, batchSize,
 	)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := result.RowsAffected()
+	return int(rows), err
+}
+
+func (r *sqliteTxRepo) RecordDownload(ctx context.Context, entryID uuid.UUID, word, filename, clientIP, userAgent string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := r.tx.ExecContext(ctx,
+		`INSERT INTO download_history (entry_id, word, filename, requested_at, client_ip, user_agent) VALUES (?, ?, ?, ?, ?, ?)`,
+		entryID.String(), word, filename, now, clientIP, userAgent,
+	)
+	return err
+}
+
+func (r *sqliteTxRepo) CleanDownloadHistory(ctx context.Context, olderThan time.Time) (int, error) {
+	cutoff := olderThan.UTC().Format(time.RFC3339)
+	result, err := r.tx.ExecContext(ctx, `DELETE FROM download_history WHERE requested_at < ?`, cutoff)
 	if err != nil {
 		return 0, err
 	}
