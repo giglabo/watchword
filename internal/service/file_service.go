@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/watchword/watchword/internal/domain"
 	"github.com/watchword/watchword/internal/repository"
 	s3client "github.com/watchword/watchword/internal/s3"
@@ -93,51 +95,40 @@ func (s *FileService) UploadFile(ctx context.Context, word string, filename stri
 		expiresAt = &t
 	}
 
+	// Pre-generate the entry ID so we can build the S3 key and metadata payload
+	// up front and persist the entry with a single Store call inside the tx.
+	entryID := uuid.New()
+	s3Key := fmt.Sprintf("%s/%s", entryID.String(), filename)
+	meta := domain.FileMetadata{
+		S3Key:       s3Key,
+		Filename:    filename,
+		ContentType: contentType,
+		SizeLimit:   s.maxFileSize,
+	}
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		return nil, fmt.Errorf("marshalling file metadata: %w", err)
+	}
+
 	var result *UploadResult
-	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+	err = s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
 		resolvedWord, collision, err := resolveWord(ctx, txRepo, word)
 		if err != nil {
 			return err
 		}
 
-		// Create a new entry UUID for the S3 key
 		entry := &domain.Entry{
+			ID:        entryID,
 			Word:      resolvedWord,
+			Payload:   string(metaJSON),
 			EntryType: domain.EntryTypeFile,
 			ExpiresAt: expiresAt,
 		}
-
-		// Store first to get the generated UUID
 		created, err := txRepo.Store(ctx, entry)
 		if err != nil {
 			return err
 		}
 
-		s3Key := fmt.Sprintf("%s/%s", created.ID.String(), filename)
-		meta := domain.FileMetadata{
-			S3Key:       s3Key,
-			Filename:    filename,
-			ContentType: contentType,
-			SizeLimit:   s.maxFileSize,
-		}
-		metaJSON, err := json.Marshal(meta)
-		if err != nil {
-			return fmt.Errorf("marshalling file metadata: %w", err)
-		}
-
-		// Update the payload with metadata (using UpdateStatus to write the word back with payload)
-		// We need to set the payload — but UpdateStatus doesn't touch payload.
-		// Instead, delete and re-store with the correct payload.
-		if err := txRepo.Delete(ctx, created.ID); err != nil {
-			return err
-		}
-		created.Payload = string(metaJSON)
-		created, err = txRepo.Store(ctx, created)
-		if err != nil {
-			return err
-		}
-
-		// Generate presigned PUT URL
 		uploadURL, err := s.presigner.PresignPUT(ctx, s3Key, contentType, s.maxFileSize)
 		if err != nil {
 			return fmt.Errorf("generating upload URL: %w", err)
