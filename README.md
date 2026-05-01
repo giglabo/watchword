@@ -308,6 +308,7 @@ When configured, Watchword registers `upload_file` and `download_file` tools. Fi
 
 | Setting | Env var | Default | Description |
 |---------|---------|---------|-------------|
+| `s3.enabled` | `WORDSTORE_S3_ENABLED` | *(unset)* | Set to `false` to force-disable S3 even if other `s3.*` / `WORDSTORE_S3_*` values are present. Useful for environments that may leak partial S3 env vars. |
 | `s3.endpoint` | `WORDSTORE_S3_ENDPOINT` | *(empty = AWS)* | Custom endpoint URL (required for R2, MinIO) |
 | `s3.region` | `WORDSTORE_S3_REGION` | | AWS region (e.g. `eu-central-1`) |
 | `s3.bucket` | `WORDSTORE_S3_BUCKET` | | S3 bucket name |
@@ -342,7 +343,7 @@ s3:
 
 **S3 object cleanup**: Expired file entries do not auto-delete S3 objects. Use [S3 lifecycle rules](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html) for garbage collection.
 
-If `s3` is not configured, only the original text-based tools are registered — no S3 dependency.
+If `s3` is not configured, only the original text-based tools are registered — no S3 dependency. To explicitly disable S3 in environments where partial `WORDSTORE_S3_*` env vars may leak in (e.g. shared k8s ConfigMaps), set `s3.enabled: false` (or `WORDSTORE_S3_ENABLED=false`) — the entire S3 block is then discarded after config load.
 
 ### Expiration
 
