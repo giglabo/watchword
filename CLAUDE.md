@@ -41,6 +41,10 @@ docker compose up -d    # Run with PostgreSQL + Streamable HTTP (via supergatewa
 - **entry_type column** — `text` (default) or `file`; file entries store JSON metadata in payload field
 - **Streamable HTTP via supergateway** — Docker image wraps the stdio binary with [supergateway](https://github.com/supercorp-ai/supergateway) to expose Streamable HTTP on `/mcp`. Uses `--stateful` mode to avoid the child-process OOM leak ([PR #111](https://github.com/supercorp-ai/supergateway/pull/111)). Built from the PR #111 branch for the stateless leak fix as well.
 
+## Commit Guidelines
+
+- Never add Claude as a co-author in commit messages (no `Co-Authored-By: Claude` lines).
+
 ## MCP Library
 
 Uses `github.com/mark3labs/mcp-go` for MCP protocol support (stdio + SSE transports).

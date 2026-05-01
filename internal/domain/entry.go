@@ -61,6 +61,7 @@ type Entry struct {
 	CreatedAt time.Time   `json:"created_at"`
 	UpdatedAt time.Time   `json:"updated_at"`
 	ExpiresAt *time.Time  `json:"expires_at,omitempty"`
+	CreatedBy *string     `json:"created_by,omitempty"`
 }
 
 // FileMetadata is stored as JSON in Payload for file entries.

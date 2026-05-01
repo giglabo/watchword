@@ -20,9 +20,21 @@ type Config struct {
 }
 
 type S3Config struct {
+	// Enabled explicitly toggles S3 file storage. When set to false the entire
+	// S3 block is discarded after config load — this is the safe way to ensure
+	// S3 stays off in environments that may leak partial WORDSTORE_S3_* env
+	// vars (e.g. shared k8s ConfigMaps). When unset (nil), S3 is enabled if
+	// the block is otherwise present.
+	Enabled           *bool        `yaml:"enabled"`
 	Endpoint          string       `yaml:"endpoint"`
 	Region            string       `yaml:"region"`
 	Bucket            string       `yaml:"bucket"`
+	// KeyPrefix is an optional folder/prefix prepended to every S3 object key.
+	// Empty (default) keeps the legacy layout: "<entry-uuid>/<filename>" at
+	// bucket root. With prefix "tenants/acme" keys become
+	// "tenants/acme/<entry-uuid>/<filename>". Existing entries keep their
+	// stored key — only new uploads use the prefix.
+	KeyPrefix         string       `yaml:"key_prefix"`
 	PresignTTLMinutes int          `yaml:"presign_ttl_minutes"`
 	MaxFileSizeBytes  int64        `yaml:"max_file_size_bytes"`
 	Proxy             *ProxyConfig `yaml:"proxy"`
@@ -155,17 +167,30 @@ type PostgresConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled          bool                      `yaml:"enabled"`
-	Tokens           []string                  `yaml:"tokens"`
-	JWT              *JWTConfig                `yaml:"jwt"`
-	OAuthMetadata    *OAuthMetadataConfig      `yaml:"oauth_metadata"`
-	ResourceMetadata *ResourceMetadataConfig   `yaml:"resource_metadata"`
+	Enabled          bool                    `yaml:"enabled"`
+	Tokens           []string                `yaml:"tokens"`
+	NamedTokens      []NamedToken            `yaml:"named_tokens"`
+	JWT              *JWTConfig              `yaml:"jwt"`
+	OAuthMetadata    *OAuthMetadataConfig    `yaml:"oauth_metadata"`
+	ResourceMetadata *ResourceMetadataConfig `yaml:"resource_metadata"`
+}
+
+// NamedToken associates a static bearer token with a label that is recorded
+// as `created_by` on entries the holder creates.
+type NamedToken struct {
+	Name  string `yaml:"name"`
+	Token string `yaml:"token"`
 }
 
 type JWTConfig struct {
-	JWKSURL  string `yaml:"jwks_url"`
-	Issuer   string `yaml:"issuer"`
-	Audience string `yaml:"audience"`
+	JWKSURL        string   `yaml:"jwks_url"`
+	Issuer         string   `yaml:"issuer"`
+	Audience       string   `yaml:"audience"`
+	RequiredScopes []string `yaml:"required_scopes"`
+	// IdentityClaim is the claim used to populate `created_by` on stored
+	// entries. Defaults to "sub". Common alternatives: "email",
+	// "preferred_username".
+	IdentityClaim string `yaml:"identity_claim"`
 }
 
 type OAuthMetadataConfig struct {
@@ -220,6 +245,12 @@ func Load(path string) (*Config, error) {
 
 	applyEnvOverrides(cfg)
 	applyToolDefaults(cfg)
+
+	// Explicit S3 disable wins over any other S3 field that may have been
+	// populated by partial env vars or YAML — guarantees no S3 init.
+	if cfg.S3 != nil && cfg.S3.Enabled != nil && !*cfg.S3.Enabled {
+		cfg.S3 = nil
+	}
 
 	if err := validate(cfg); err != nil {
 		return nil, err
@@ -279,6 +310,18 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Auth.JWT = &JWTConfig{}
 		}
 		cfg.Auth.JWT.Audience = v
+	}
+	if v := os.Getenv("WORDSTORE_AUTH_JWT_REQUIRED_SCOPES"); v != "" {
+		if cfg.Auth.JWT == nil {
+			cfg.Auth.JWT = &JWTConfig{}
+		}
+		cfg.Auth.JWT.RequiredScopes = strings.Split(v, ",")
+	}
+	if v := os.Getenv("WORDSTORE_AUTH_JWT_IDENTITY_CLAIM"); v != "" {
+		if cfg.Auth.JWT == nil {
+			cfg.Auth.JWT = &JWTConfig{}
+		}
+		cfg.Auth.JWT.IdentityClaim = v
 	}
 	if v := os.Getenv("WORDSTORE_AUTH_OAUTH_AUTHORIZATION_ENDPOINT"); v != "" {
 		if cfg.Auth.OAuthMetadata == nil {
@@ -340,6 +383,13 @@ func applyEnvOverrides(cfg *Config) {
 	}
 
 	// S3 env overrides
+	if v := os.Getenv("WORDSTORE_S3_ENABLED"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		b := strings.EqualFold(v, "true") || v == "1"
+		cfg.S3.Enabled = &b
+	}
 	if v := os.Getenv("WORDSTORE_S3_ENDPOINT"); v != "" {
 		if cfg.S3 == nil {
 			cfg.S3 = &S3Config{}
@@ -357,6 +407,12 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.S3 = &S3Config{}
 		}
 		cfg.S3.Bucket = v
+	}
+	if v := os.Getenv("WORDSTORE_S3_KEY_PREFIX"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		cfg.S3.KeyPrefix = v
 	}
 	if v := os.Getenv("WORDSTORE_S3_PRESIGN_TTL_MINUTES"); v != "" {
 		if cfg.S3 == nil {
@@ -482,12 +538,10 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("expiration.ttl_hours must be >= 0")
 	}
 	if cfg.S3 != nil {
-		if cfg.S3.Bucket == "" {
-			return fmt.Errorf("s3.bucket is required when s3 is configured")
-		}
-		if cfg.S3.Region == "" {
-			return fmt.Errorf("s3.region is required when s3 is configured")
-		}
+		// Missing bucket/region or proxy hmac_secret/base_url are no longer
+		// fatal here — main() inspects these and disables file tools (with a
+		// warning) instead of failing startup, so the rest of the MCP server
+		// keeps working.
 		if cfg.S3.PresignTTLMinutes <= 0 {
 			cfg.S3.PresignTTLMinutes = 15
 		}
@@ -495,12 +549,6 @@ func validate(cfg *Config) error {
 			cfg.S3.MaxFileSizeBytes = 1073741824 // 1GB
 		}
 		if p := cfg.S3.Proxy; p != nil {
-			if p.HMACSecret == "" {
-				return fmt.Errorf("s3.proxy.hmac_secret is required when proxy is configured")
-			}
-			if p.BaseURL == "" {
-				return fmt.Errorf("s3.proxy.base_url is required when proxy is configured")
-			}
 			if p.URLTTLMinutes <= 0 {
 				p.URLTTLMinutes = 5
 			}
