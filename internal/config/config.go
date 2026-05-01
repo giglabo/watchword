@@ -20,6 +20,12 @@ type Config struct {
 }
 
 type S3Config struct {
+	// Enabled explicitly toggles S3 file storage. When set to false the entire
+	// S3 block is discarded after config load — this is the safe way to ensure
+	// S3 stays off in environments that may leak partial WORDSTORE_S3_* env
+	// vars (e.g. shared k8s ConfigMaps). When unset (nil), S3 is enabled if
+	// the block is otherwise present.
+	Enabled           *bool        `yaml:"enabled"`
 	Endpoint          string       `yaml:"endpoint"`
 	Region            string       `yaml:"region"`
 	Bucket            string       `yaml:"bucket"`
@@ -234,6 +240,12 @@ func Load(path string) (*Config, error) {
 	applyEnvOverrides(cfg)
 	applyToolDefaults(cfg)
 
+	// Explicit S3 disable wins over any other S3 field that may have been
+	// populated by partial env vars or YAML — guarantees no S3 init.
+	if cfg.S3 != nil && cfg.S3.Enabled != nil && !*cfg.S3.Enabled {
+		cfg.S3 = nil
+	}
+
 	if err := validate(cfg); err != nil {
 		return nil, err
 	}
@@ -365,6 +377,13 @@ func applyEnvOverrides(cfg *Config) {
 	}
 
 	// S3 env overrides
+	if v := os.Getenv("WORDSTORE_S3_ENABLED"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		b := strings.EqualFold(v, "true") || v == "1"
+		cfg.S3.Enabled = &b
+	}
 	if v := os.Getenv("WORDSTORE_S3_ENDPOINT"); v != "" {
 		if cfg.S3 == nil {
 			cfg.S3 = &S3Config{}
@@ -507,12 +526,10 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("expiration.ttl_hours must be >= 0")
 	}
 	if cfg.S3 != nil {
-		if cfg.S3.Bucket == "" {
-			return fmt.Errorf("s3.bucket is required when s3 is configured")
-		}
-		if cfg.S3.Region == "" {
-			return fmt.Errorf("s3.region is required when s3 is configured")
-		}
+		// Missing bucket/region or proxy hmac_secret/base_url are no longer
+		// fatal here — main() inspects these and disables file tools (with a
+		// warning) instead of failing startup, so the rest of the MCP server
+		// keeps working.
 		if cfg.S3.PresignTTLMinutes <= 0 {
 			cfg.S3.PresignTTLMinutes = 15
 		}
@@ -520,12 +537,6 @@ func validate(cfg *Config) error {
 			cfg.S3.MaxFileSizeBytes = 1073741824 // 1GB
 		}
 		if p := cfg.S3.Proxy; p != nil {
-			if p.HMACSecret == "" {
-				return fmt.Errorf("s3.proxy.hmac_secret is required when proxy is configured")
-			}
-			if p.BaseURL == "" {
-				return fmt.Errorf("s3.proxy.base_url is required when proxy is configured")
-			}
 			if p.URLTTLMinutes <= 0 {
 				p.URLTTLMinutes = 5
 			}

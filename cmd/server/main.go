@@ -93,19 +93,34 @@ func main() {
 	var fileSvc *service.FileService
 	var s3c *s3client.Client
 	if cfg.S3 != nil {
-		var err error
-		s3c, err = s3client.NewClient(ctx, cfg.S3)
-		if err != nil {
-			logger.Error("failed to initialize S3 client", "error", err)
-			os.Exit(1)
-		}
-		fileSvc = service.NewFileService(repo, s3c, cfg.Expiration.TTLHours, cfg.S3.MaxFileSizeBytes, logger)
-		logger.Info("S3 file storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
+		switch {
+		case cfg.S3.Bucket == "" || cfg.S3.Region == "":
+			logger.Warn("S3 config incomplete, file tools disabled",
+				"bucket_set", cfg.S3.Bucket != "", "region_set", cfg.S3.Region != "")
+			cfg.S3 = nil
+		default:
+			var err error
+			s3c, err = s3client.NewClient(ctx, cfg.S3)
+			if err != nil {
+				logger.Warn("S3 client init failed, file tools disabled", "error", err)
+				s3c = nil
+				cfg.S3 = nil
+			} else {
+				fileSvc = service.NewFileService(repo, s3c, cfg.Expiration.TTLHours, cfg.S3.MaxFileSizeBytes, logger)
+				logger.Info("S3 file storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
 
-		if cfg.S3.Proxy != nil {
-			signer := proxy.NewURLSigner(cfg.S3.Proxy.BaseURL, cfg.S3.Proxy.HMACSecret, cfg.S3.Proxy.URLTTLMinutes)
-			fileSvc.SetProxySigner(signer)
-			logger.Info("proxy download enabled", "base_url", cfg.S3.Proxy.BaseURL, "ttl_minutes", cfg.S3.Proxy.URLTTLMinutes)
+				if p := cfg.S3.Proxy; p != nil {
+					if p.HMACSecret == "" || p.BaseURL == "" {
+						logger.Warn("proxy config incomplete, proxy download disabled",
+							"hmac_secret_set", p.HMACSecret != "", "base_url_set", p.BaseURL != "")
+						cfg.S3.Proxy = nil
+					} else {
+						signer := proxy.NewURLSigner(p.BaseURL, p.HMACSecret, p.URLTTLMinutes)
+						fileSvc.SetProxySigner(signer)
+						logger.Info("proxy download enabled", "base_url", p.BaseURL, "ttl_minutes", p.URLTTLMinutes)
+					}
+				}
+			}
 		}
 	}
 
