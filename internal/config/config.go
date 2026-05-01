@@ -155,17 +155,30 @@ type PostgresConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled          bool                      `yaml:"enabled"`
-	Tokens           []string                  `yaml:"tokens"`
-	JWT              *JWTConfig                `yaml:"jwt"`
-	OAuthMetadata    *OAuthMetadataConfig      `yaml:"oauth_metadata"`
-	ResourceMetadata *ResourceMetadataConfig   `yaml:"resource_metadata"`
+	Enabled          bool                    `yaml:"enabled"`
+	Tokens           []string                `yaml:"tokens"`
+	NamedTokens      []NamedToken            `yaml:"named_tokens"`
+	JWT              *JWTConfig              `yaml:"jwt"`
+	OAuthMetadata    *OAuthMetadataConfig    `yaml:"oauth_metadata"`
+	ResourceMetadata *ResourceMetadataConfig `yaml:"resource_metadata"`
+}
+
+// NamedToken associates a static bearer token with a label that is recorded
+// as `created_by` on entries the holder creates.
+type NamedToken struct {
+	Name  string `yaml:"name"`
+	Token string `yaml:"token"`
 }
 
 type JWTConfig struct {
-	JWKSURL  string `yaml:"jwks_url"`
-	Issuer   string `yaml:"issuer"`
-	Audience string `yaml:"audience"`
+	JWKSURL        string   `yaml:"jwks_url"`
+	Issuer         string   `yaml:"issuer"`
+	Audience       string   `yaml:"audience"`
+	RequiredScopes []string `yaml:"required_scopes"`
+	// IdentityClaim is the claim used to populate `created_by` on stored
+	// entries. Defaults to "sub". Common alternatives: "email",
+	// "preferred_username".
+	IdentityClaim string `yaml:"identity_claim"`
 }
 
 type OAuthMetadataConfig struct {
@@ -279,6 +292,18 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Auth.JWT = &JWTConfig{}
 		}
 		cfg.Auth.JWT.Audience = v
+	}
+	if v := os.Getenv("WORDSTORE_AUTH_JWT_REQUIRED_SCOPES"); v != "" {
+		if cfg.Auth.JWT == nil {
+			cfg.Auth.JWT = &JWTConfig{}
+		}
+		cfg.Auth.JWT.RequiredScopes = strings.Split(v, ",")
+	}
+	if v := os.Getenv("WORDSTORE_AUTH_JWT_IDENTITY_CLAIM"); v != "" {
+		if cfg.Auth.JWT == nil {
+			cfg.Auth.JWT = &JWTConfig{}
+		}
+		cfg.Auth.JWT.IdentityClaim = v
 	}
 	if v := os.Getenv("WORDSTORE_AUTH_OAUTH_AUTHORIZATION_ENDPOINT"); v != "" {
 		if cfg.Auth.OAuthMetadata == nil {

@@ -52,7 +52,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	authenticator := auth.NewAuthenticator(cfg.Auth.Enabled, cfg.Auth.Tokens)
+	authenticator := auth.NewAuthenticator(cfg.Auth.Enabled, cfg.Auth.Tokens, cfg.Auth.NamedTokens)
 
 	if cfg.Auth.JWT != nil {
 		jwtVal, err := auth.NewJWTValidator(ctx, cfg.Auth.JWT)
@@ -75,11 +75,17 @@ func main() {
 
 	if cfg.Server.Transport == "stdio" && cfg.Auth.Enabled {
 		token := os.Getenv("WORDSTORE_AUTH_TOKEN")
-		if err := authenticator.Validate(token); err != nil {
+		identity, err := authenticator.Validate(token)
+		if err != nil {
 			logger.Error("stdio auth failed: invalid WORDSTORE_AUTH_TOKEN")
 			os.Exit(1)
 		}
-		logger.Info("stdio auth validated successfully")
+		if identity != "" {
+			ctx = auth.WithIdentity(ctx, identity)
+			logger.Info("stdio auth validated successfully", "identity", identity)
+		} else {
+			logger.Info("stdio auth validated successfully")
+		}
 	}
 
 	svc := service.NewEntryService(repo, cfg.Expiration.TTLHours, logger)

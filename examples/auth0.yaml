@@ -1,0 +1,50 @@
+# Watchword + Auth0
+#
+# Plug Watchword into an Auth0 tenant. Replace placeholders:
+#   {TENANT}      Auth0 tenant subdomain, e.g. "acme" or "acme.eu"
+#   {API_ID}      the API Identifier you set on your Auth0 API
+#                 (e.g. "https://watchword.example.com/api")
+#   {WATCHWORD}   public URL of this MCP server (e.g. https://watchword.example.com)
+#
+# Issuer trap: Auth0 emits `iss` with a trailing slash. Match it exactly.
+#
+# Scopes: declare scopes (e.g. `watchword:read`, `watchword:write`) on the
+# Auth0 API and grant them to the application/user. Auth0 puts them in the
+# `scope` claim (space-delimited string).
+
+server:
+  transport: "streamable-http"
+  http_port: 8080
+
+database:
+  driver: "postgres"
+  postgres:
+    dsn: "postgres://wordstore:wordstore@localhost:5432/wordstore?sslmode=disable"
+
+auth:
+  enabled: true
+
+  resource_metadata:
+    resource: "{WATCHWORD}"
+    authorization_servers:
+      - "https://{TENANT}.auth0.com/"
+    scopes_supported:
+      - "watchword:read"
+      - "watchword:write"
+
+  jwt:
+    jwks_url: "https://{TENANT}.auth0.com/.well-known/jwks.json"
+    issuer:   "https://{TENANT}.auth0.com/"   # trailing slash matters
+    audience: "{API_ID}"
+    required_scopes:
+      - "watchword:read"
+    identity_claim: "sub"        # Auth0 `sub` looks like "auth0|abc123". Use "email" for human-readable created_by (requires the openid email scope).
+
+expiration:
+  enabled: true
+  interval_hours: 24
+  ttl_hours: 168
+
+logging:
+  level: "info"
+  format: "json"
