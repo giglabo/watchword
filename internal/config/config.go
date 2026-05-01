@@ -29,6 +29,12 @@ type S3Config struct {
 	Endpoint          string       `yaml:"endpoint"`
 	Region            string       `yaml:"region"`
 	Bucket            string       `yaml:"bucket"`
+	// KeyPrefix is an optional folder/prefix prepended to every S3 object key.
+	// Empty (default) keeps the legacy layout: "<entry-uuid>/<filename>" at
+	// bucket root. With prefix "tenants/acme" keys become
+	// "tenants/acme/<entry-uuid>/<filename>". Existing entries keep their
+	// stored key — only new uploads use the prefix.
+	KeyPrefix         string       `yaml:"key_prefix"`
 	PresignTTLMinutes int          `yaml:"presign_ttl_minutes"`
 	MaxFileSizeBytes  int64        `yaml:"max_file_size_bytes"`
 	Proxy             *ProxyConfig `yaml:"proxy"`
@@ -401,6 +407,12 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.S3 = &S3Config{}
 		}
 		cfg.S3.Bucket = v
+	}
+	if v := os.Getenv("WORDSTORE_S3_KEY_PREFIX"); v != "" {
+		if cfg.S3 == nil {
+			cfg.S3 = &S3Config{}
+		}
+		cfg.S3.KeyPrefix = v
 	}
 	if v := os.Getenv("WORDSTORE_S3_PRESIGN_TTL_MINUTES"); v != "" {
 		if cfg.S3 == nil {

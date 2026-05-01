@@ -42,6 +42,10 @@ func (p *fakePresigner) DeleteObject(_ context.Context, key string) error {
 }
 
 func newTestFileService(t *testing.T) (*FileService, repository.Repository, *fakePresigner) {
+	return newTestFileServiceWithPrefix(t, "")
+}
+
+func newTestFileServiceWithPrefix(t *testing.T, keyPrefix string) (*FileService, repository.Repository, *fakePresigner) {
 	t.Helper()
 	repo, err := repository.NewSQLiteRepo(":memory:")
 	if err != nil {
@@ -53,7 +57,7 @@ func newTestFileService(t *testing.T) (*FileService, repository.Repository, *fak
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	pres := &fakePresigner{}
-	svc := NewFileService(repo, pres, 168, 1<<20, logger)
+	svc := NewFileService(repo, pres, 168, 1<<20, keyPrefix, logger)
 	return svc, repo, pres
 }
 
@@ -138,5 +142,34 @@ func TestUploadFile_NoCollision(t *testing.T) {
 	}
 	if meta.S3Key != expectedKey {
 		t.Errorf("meta.S3Key = %q, want %q", meta.S3Key, expectedKey)
+	}
+}
+
+func TestUploadFile_KeyPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		prefix  string
+		wantPfx string // expected normalized prefix in S3 key
+	}{
+		{"plain", "tenants/acme", "tenants/acme/"},
+		{"trailing slash trimmed", "tenants/acme/", "tenants/acme/"},
+		{"leading slash trimmed", "/tenants/acme", "tenants/acme/"},
+		{"both slashes trimmed", "/tenants/acme/", "tenants/acme/"},
+		{"empty prefix = legacy", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, pres := newTestFileServiceWithPrefix(t, tc.prefix)
+			ctx := context.Background()
+
+			result, err := svc.UploadFile(ctx, "fox", "report.txt", "text/plain", nil)
+			if err != nil {
+				t.Fatalf("UploadFile: %v", err)
+			}
+			wantKey := tc.wantPfx + result.ID + "/report.txt"
+			if len(pres.putKeys) != 1 || pres.putKeys[0] != wantKey {
+				t.Fatalf("PUT keys = %v, want [%s]", pres.putKeys, wantKey)
+			}
+		})
 	}
 }

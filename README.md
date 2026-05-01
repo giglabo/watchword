@@ -15,7 +15,8 @@ LLM conversations are ephemeral. Watchword gives your assistant persistent, name
 - **Collision resolution** — if a keyword is taken, the server auto-appends a suffix (`rabbit` -> `rabbit2`)
 - **SQLite or PostgreSQL** backends
 - **Automatic expiration** — entries expire after a configurable TTL (or never, with `ttl_hours: 0`)
-- **Bearer token and JWT/JWKS authentication**
+- **Bearer token and JWT/JWKS authentication** — with optional named tokens for service accounts
+- **Per-entry `created_by` tracking** — populated from a JWT identity claim or a named static token, surfaced on read/list/search responses
 - **Health endpoints** for Kubernetes liveness/readiness probes
 - **Customizable tool descriptions** — tune the prompts your LLM sees via `config.yaml`
 - **Transports**: stdio, SSE, Streamable HTTP, or combined HTTP mode
@@ -312,6 +313,7 @@ When configured, Watchword registers `upload_file` and `download_file` tools. Fi
 | `s3.endpoint` | `WORDSTORE_S3_ENDPOINT` | *(empty = AWS)* | Custom endpoint URL (required for R2, MinIO) |
 | `s3.region` | `WORDSTORE_S3_REGION` | | AWS region (e.g. `eu-central-1`) |
 | `s3.bucket` | `WORDSTORE_S3_BUCKET` | | S3 bucket name |
+| `s3.key_prefix` | `WORDSTORE_S3_KEY_PREFIX` | *(empty)* | Optional folder/prefix prepended to every new object key (e.g. `tenants/acme`). Existing entries keep their stored key. |
 | `s3.presign_ttl_minutes` | `WORDSTORE_S3_PRESIGN_TTL_MINUTES` | `15` | How long presigned URLs remain valid |
 | `s3.max_file_size_bytes` | `WORDSTORE_S3_MAX_FILE_SIZE_BYTES` | `1073741824` | Max file size (default 1GB) |
 | | `WORDSTORE_S3_ACCESS_KEY_ID` | | S3 access key (env var only — never in config file) |
@@ -343,7 +345,7 @@ s3:
 
 **S3 object cleanup**: Expired file entries do not auto-delete S3 objects. Use [S3 lifecycle rules](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html) for garbage collection.
 
-If `s3` is not configured, only the original text-based tools are registered — no S3 dependency. To explicitly disable S3 in environments where partial `WORDSTORE_S3_*` env vars may leak in (e.g. shared k8s ConfigMaps), set `s3.enabled: false` (or `WORDSTORE_S3_ENABLED=false`) — the entire S3 block is then discarded after config load.
+If `s3` is not configured, only the original text-based tools are registered — no S3 dependency. Partial S3 config (e.g. region set but no bucket, or missing credentials) does **not** fail startup — Watchword logs a warning and continues with the file tools disabled. To explicitly disable S3 in environments where partial `WORDSTORE_S3_*` env vars may leak in (e.g. shared k8s ConfigMaps), set `s3.enabled: false` (or `WORDSTORE_S3_ENABLED=false`) — the entire S3 block is then discarded after config load.
 
 ### Expiration
 

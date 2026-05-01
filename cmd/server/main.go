@@ -106,8 +106,8 @@ func main() {
 				s3c = nil
 				cfg.S3 = nil
 			} else {
-				fileSvc = service.NewFileService(repo, s3c, cfg.Expiration.TTLHours, cfg.S3.MaxFileSizeBytes, logger)
-				logger.Info("S3 file storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region)
+				fileSvc = service.NewFileService(repo, s3c, cfg.Expiration.TTLHours, cfg.S3.MaxFileSizeBytes, cfg.S3.KeyPrefix, logger)
+				logger.Info("S3 file storage enabled", "bucket", cfg.S3.Bucket, "region", cfg.S3.Region, "key_prefix", cfg.S3.KeyPrefix)
 
 				if p := cfg.S3.Proxy; p != nil {
 					if p.HMACSecret == "" || p.BaseURL == "" {

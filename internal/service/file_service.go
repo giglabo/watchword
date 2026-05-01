@@ -28,6 +28,7 @@ type FileService struct {
 	proxySigner  ProxyURLSigner
 	defaultTTL   int // hours
 	maxFileSize  int64
+	keyPrefix    string // normalized: no leading/trailing slashes; "" = no prefix
 	logger       *slog.Logger
 }
 
@@ -36,12 +37,13 @@ func (s *FileService) SetProxySigner(signer ProxyURLSigner) {
 	s.proxySigner = signer
 }
 
-func NewFileService(repo repository.Repository, presigner s3client.Presigner, defaultTTLHours int, maxFileSize int64, logger *slog.Logger) *FileService {
+func NewFileService(repo repository.Repository, presigner s3client.Presigner, defaultTTLHours int, maxFileSize int64, keyPrefix string, logger *slog.Logger) *FileService {
 	return &FileService{
 		repo:        repo,
 		presigner:   presigner,
 		defaultTTL:  defaultTTLHours,
 		maxFileSize: maxFileSize,
+		keyPrefix:   strings.Trim(keyPrefix, "/"),
 		logger:      logger,
 	}
 }
@@ -101,6 +103,9 @@ func (s *FileService) UploadFile(ctx context.Context, word string, filename stri
 	// up front and persist the entry with a single Store call inside the tx.
 	entryID := uuid.New()
 	s3Key := fmt.Sprintf("%s/%s", entryID.String(), filename)
+	if s.keyPrefix != "" {
+		s3Key = s.keyPrefix + "/" + s3Key
+	}
 	meta := domain.FileMetadata{
 		S3Key:       s3Key,
 		Filename:    filename,
