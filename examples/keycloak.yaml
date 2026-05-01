@@ -1,0 +1,54 @@
+# Watchword + Keycloak
+#
+# Plug Watchword into a Keycloak realm. Replace placeholders:
+#   {KC_BASE}     e.g. https://keycloak.example.com
+#   {REALM}       Keycloak realm name (e.g. "watchword")
+#   {WATCHWORD}   public URL of this MCP server (e.g. https://watchword.example.com)
+#
+# Audience trap: by default Keycloak puts "account" in `aud`, which means any
+# authenticated realm user passes the audience check. To bind tokens to this
+# API, create an "Audience" client scope that emits a custom audience (e.g.
+# "watchword") and assign it to the client. Then set `audience` below to that
+# value.
+#
+# Scopes: create client scopes like `watchword:read` / `watchword:write` and
+# require them via `required_scopes`. Both `scope` (string) and `scp` (array)
+# claims are supported.
+
+server:
+  transport: "streamable-http"
+  http_port: 8080
+
+database:
+  driver: "postgres"
+  postgres:
+    dsn: "postgres://wordstore:wordstore@localhost:5432/wordstore?sslmode=disable"
+
+auth:
+  enabled: true
+
+  # MCP clients discover the authorization server here (RFC 9728).
+  resource_metadata:
+    resource: "{WATCHWORD}"
+    authorization_servers:
+      - "{KC_BASE}/realms/{REALM}"
+    scopes_supported:
+      - "watchword:read"
+      - "watchword:write"
+
+  jwt:
+    jwks_url: "{KC_BASE}/realms/{REALM}/protocol/openid-connect/certs"
+    issuer:   "{KC_BASE}/realms/{REALM}"
+    audience: "watchword"        # the value emitted by your Audience client scope
+    required_scopes:
+      - "watchword:read"
+    identity_claim: "preferred_username"   # `sub` is a UUID in Keycloak — `preferred_username` or `email` is friendlier for `created_by`
+
+expiration:
+  enabled: true
+  interval_hours: 24
+  ttl_hours: 168
+
+logging:
+  level: "info"
+  format: "json"

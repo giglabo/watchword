@@ -15,29 +15,67 @@ import (
 )
 
 func TestAuthenticator_Validate(t *testing.T) {
-	a := NewAuthenticator(true, []string{"token1", "token2"})
+	a := NewAuthenticator(true, []string{"token1", "token2"}, nil)
 
-	if err := a.Validate("token1"); err != nil {
+	if _, err := a.Validate("token1"); err != nil {
 		t.Errorf("valid token1 should pass: %v", err)
 	}
-	if err := a.Validate("token2"); err != nil {
+	if _, err := a.Validate("token2"); err != nil {
 		t.Errorf("valid token2 should pass: %v", err)
 	}
-	if err := a.Validate("invalid"); err == nil {
+	if _, err := a.Validate("invalid"); err == nil {
 		t.Error("invalid token should fail")
 	}
-	if err := a.Validate(""); err == nil {
+	if _, err := a.Validate(""); err == nil {
 		t.Error("empty token should fail")
 	}
 }
 
 func TestAuthenticator_Disabled(t *testing.T) {
-	a := NewAuthenticator(false, nil)
-	if err := a.Validate(""); err != nil {
+	a := NewAuthenticator(false, nil, nil)
+	if _, err := a.Validate(""); err != nil {
 		t.Errorf("disabled auth should pass: %v", err)
 	}
-	if err := a.Validate("anything"); err != nil {
+	if _, err := a.Validate("anything"); err != nil {
 		t.Errorf("disabled auth should pass: %v", err)
+	}
+}
+
+func TestAuthenticator_NamedTokens(t *testing.T) {
+	a := NewAuthenticator(true, nil, []config.NamedToken{
+		{Name: "ci-bot", Token: "secret-1"},
+		{Name: "alice", Token: "secret-2"},
+	})
+
+	id, err := a.Validate("secret-1")
+	if err != nil {
+		t.Fatalf("valid named token should pass: %v", err)
+	}
+	if id != "ci-bot" {
+		t.Errorf("expected identity 'ci-bot', got %q", id)
+	}
+
+	id, err = a.Validate("secret-2")
+	if err != nil {
+		t.Fatalf("valid named token should pass: %v", err)
+	}
+	if id != "alice" {
+		t.Errorf("expected identity 'alice', got %q", id)
+	}
+
+	if _, err := a.Validate("nope"); err == nil {
+		t.Error("unknown token should fail")
+	}
+}
+
+func TestAuthenticator_PlainTokenIsAnonymous(t *testing.T) {
+	a := NewAuthenticator(true, []string{"plain"}, nil)
+	id, err := a.Validate("plain")
+	if err != nil {
+		t.Fatalf("plain token should pass: %v", err)
+	}
+	if id != "" {
+		t.Errorf("plain (unnamed) token should yield anonymous identity, got %q", id)
 	}
 }
 
@@ -57,25 +95,33 @@ func TestAuthenticator_JWTDispatch(t *testing.T) {
 	}
 	defer jwtVal.Close()
 
-	a := NewAuthenticator(true, []string{"plain-token"})
+	a := NewAuthenticator(true, []string{"plain-token"}, nil)
 	a.SetJWTValidator(jwtVal)
 
-	// Valid JWT should pass
+	// Valid JWT should pass and yield the sub claim as identity
 	jwtToken := signToken(t, key, kid, jwt.MapClaims{
 		"sub": "user1",
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
-	if err := a.Validate(jwtToken); err != nil {
+	id, err := a.Validate(jwtToken)
+	if err != nil {
 		t.Errorf("valid JWT should pass: %v", err)
 	}
+	if id != "user1" {
+		t.Errorf("expected identity 'user1', got %q", id)
+	}
 
-	// Plain token should still work
-	if err := a.Validate("plain-token"); err != nil {
+	// Plain token should still work (anonymous)
+	id, err = a.Validate("plain-token")
+	if err != nil {
 		t.Errorf("plain token should pass: %v", err)
+	}
+	if id != "" {
+		t.Errorf("plain token should be anonymous, got %q", id)
 	}
 
 	// Invalid token should fail
-	if err := a.Validate("bad-token"); err == nil {
+	if _, err := a.Validate("bad-token"); err == nil {
 		t.Error("invalid token should fail")
 	}
 }
@@ -97,17 +143,17 @@ func TestAuthenticator_JWTFallbackToPlain(t *testing.T) {
 	defer jwtVal.Close()
 
 	// Use a plain token that looks like a JWT (has 2 dots)
-	a := NewAuthenticator(true, []string{"a.b.c"})
+	a := NewAuthenticator(true, []string{"a.b.c"}, nil)
 	a.SetJWTValidator(jwtVal)
 
 	// "a.b.c" has 2 dots, so JWT is tried first but fails, then falls back to plain
-	if err := a.Validate("a.b.c"); err != nil {
+	if _, err := a.Validate("a.b.c"); err != nil {
 		t.Errorf("plain token with dots should fall back to plain validation: %v", err)
 	}
 }
 
 func TestHTTPMiddleware_SkipsWellKnown(t *testing.T) {
-	a := NewAuthenticator(true, []string{"secret"})
+	a := NewAuthenticator(true, []string{"secret"}, nil)
 
 	handler := a.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -148,7 +194,7 @@ func TestHTTPMiddleware_SkipsWellKnown(t *testing.T) {
 }
 
 func TestHTTPMiddleware_WWWAuthenticate_Plain(t *testing.T) {
-	a := NewAuthenticator(true, []string{"secret"})
+	a := NewAuthenticator(true, []string{"secret"}, nil)
 
 	handler := a.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -168,7 +214,7 @@ func TestHTTPMiddleware_WWWAuthenticate_Plain(t *testing.T) {
 }
 
 func TestHTTPMiddleware_WWWAuthenticate_WithResourceMetadata(t *testing.T) {
-	a := NewAuthenticator(true, []string{"secret"})
+	a := NewAuthenticator(true, []string{"secret"}, nil)
 	a.SetResourceMetadataURL("https://watchword.example.com/.well-known/oauth-protected-resource")
 
 	handler := a.HTTPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

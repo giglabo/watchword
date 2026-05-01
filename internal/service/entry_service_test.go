@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/watchword/watchword/internal/auth"
 	"github.com/watchword/watchword/internal/domain"
 	"github.com/watchword/watchword/internal/repository"
 )
@@ -40,6 +41,42 @@ func TestStoreEntry_Basic(t *testing.T) {
 	}
 	if result.Entry.ExpiresAt == nil {
 		t.Error("expected expires_at to be set with default TTL")
+	}
+}
+
+func TestStoreEntry_RecordsCreatedByFromContext(t *testing.T) {
+	svc := newTestService(t)
+	ctx := auth.WithIdentity(context.Background(), "alice@example.com")
+
+	result, err := svc.StoreEntry(ctx, "rabbit", "payload", nil)
+	if err != nil {
+		t.Fatalf("StoreEntry: %v", err)
+	}
+	if result.Entry.CreatedBy == nil {
+		t.Fatal("expected CreatedBy to be set from context identity")
+	}
+	if *result.Entry.CreatedBy != "alice@example.com" {
+		t.Errorf("expected CreatedBy=alice@example.com, got %q", *result.Entry.CreatedBy)
+	}
+
+	// Round-trip via GetEntry to confirm persistence
+	got, err := svc.GetEntry(context.Background(), result.Entry.ID.String())
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if got.CreatedBy == nil || *got.CreatedBy != "alice@example.com" {
+		t.Errorf("CreatedBy not persisted: got %v", got.CreatedBy)
+	}
+}
+
+func TestStoreEntry_AnonymousWhenNoIdentity(t *testing.T) {
+	svc := newTestService(t)
+	result, err := svc.StoreEntry(context.Background(), "rabbit", "payload", nil)
+	if err != nil {
+		t.Fatalf("StoreEntry: %v", err)
+	}
+	if result.Entry.CreatedBy != nil {
+		t.Errorf("expected CreatedBy=nil for anonymous request, got %q", *result.Entry.CreatedBy)
 	}
 }
 

@@ -151,7 +151,8 @@ All settings live in `config.yaml`. Every value can be overridden with environme
 | Setting | Env var | Default | Description |
 |---------|---------|---------|-------------|
 | `auth.enabled` | `WORDSTORE_AUTH_ENABLED` | `true` | Enable/disable authentication |
-| `auth.tokens` | `WORDSTORE_AUTH_TOKENS` | | Comma-separated bearer tokens |
+| `auth.tokens` | `WORDSTORE_AUTH_TOKENS` | | Comma-separated bearer tokens (anonymous — `created_by` left null) |
+| `auth.named_tokens` | | | List of `{name, token}` pairs. Requests using a named token record `created_by = name`. See [Tracking who created an entry](#tracking-who-created-an-entry). |
 | | `WORDSTORE_AUTH_TOKEN` | | Token for stdio transport validation |
 
 #### JWT / JWKS
@@ -159,8 +160,10 @@ All settings live in `config.yaml`. Every value can be overridden with environme
 | Setting | Env var | Default | Description |
 |---------|---------|---------|-------------|
 | `auth.jwt.jwks_url` | `WORDSTORE_AUTH_JWT_JWKS_URL` | | JWKS endpoint for public key discovery (required when `jwt` block is present) |
-| `auth.jwt.issuer` | `WORDSTORE_AUTH_JWT_ISSUER` | | Expected `iss` claim |
+| `auth.jwt.issuer` | `WORDSTORE_AUTH_JWT_ISSUER` | | Expected `iss` claim (exact match — Auth0 emits a trailing slash, Keycloak does not) |
 | `auth.jwt.audience` | `WORDSTORE_AUTH_JWT_AUDIENCE` | | Expected `aud` claim (recommended for OAuth — RFC 8707) |
+| `auth.jwt.required_scopes` | `WORDSTORE_AUTH_JWT_REQUIRED_SCOPES` | | Comma-separated scopes that must all be present; checked against the `scope` claim (space-delimited string) and `scp` claim (array). If unset, signature + iss + aud is enough. |
+| `auth.jwt.identity_claim` | `WORDSTORE_AUTH_JWT_IDENTITY_CLAIM` | `sub` | Claim used to populate `created_by` on stored entries. Common alternatives: `email`, `preferred_username`. |
 
 #### Protected Resource Metadata (RFC 9728)
 
@@ -219,6 +222,85 @@ Register these redirect URIs in your authorization server for Claude:
 - `https://claude.ai/api/mcp/auth_callback`
 - `https://claude.com/api/mcp/auth_callback`
 - `http://localhost:6274/oauth/callback` (Claude Code)
+
+#### Provider-specific notes
+
+Watchword validates one IdP at a time. Pick Keycloak **or** Auth0 (or a Cloudflare Workers OAuth provider); ready-made configs live in [`examples/keycloak.yaml`](examples/keycloak.yaml) and [`examples/auth0.yaml`](examples/auth0.yaml).
+
+**Keycloak**
+
+- `jwks_url`: `{base}/realms/{realm}/protocol/openid-connect/certs`
+- `issuer`: `{base}/realms/{realm}` (no trailing slash)
+- `audience`: by default Keycloak puts `account` in `aud`. Treating that as a valid audience accepts any realm user — it does not bind tokens to this API. Create an *Audience* client scope that emits a custom value (e.g. `watchword`), assign it to your client, and set `audience` to that value.
+- Scopes: define client scopes (e.g. `watchword:read`, `watchword:write`) and require them with `required_scopes`. Keycloak sends them in the `scope` claim.
+
+**Auth0**
+
+- `jwks_url`: `https://{tenant}.auth0.com/.well-known/jwks.json`
+- `issuer`: `https://{tenant}.auth0.com/` (trailing slash — Auth0 emits it and `iss` is matched exactly)
+- `audience`: the API Identifier from the Auth0 API (e.g. `https://watchword.example.com/api`)
+- Scopes: define them on the Auth0 API and grant to the app/user; Auth0 sends them in the `scope` claim.
+
+**Cloudflare**
+
+Two distinct Cloudflare products show up here — they behave differently:
+
+- **Cloudflare Workers OAuth Provider** (the pattern in [`docs/cloudflare-worker-oauth-proxy.md`](docs/cloudflare-worker-oauth-proxy.md)) — fits Watchword's bearer-token flow. The Worker issues its own JWTs; `aud` is whatever the Worker stamps. Set `audience` to that value, point `jwks_url`/`issuer` at the Worker's well-known endpoints, and treat it the same as Auth0/Keycloak.
+- **Cloudflare Access** (zero-trust app gating) — does *not* fit cleanly. Access delivers its JWT in the `Cf-Access-Jwt-Assertion` header (and cookie), not `Authorization: Bearer`. `aud` is the per-application *Application AUD* tag (a hex string from the Access dashboard); JWKS is at `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` and issuer is `https://<team>.cloudflareaccess.com`. Best used as a front door layered in front of normal MCP auth, not as the MCP auth itself.
+
+#### How `aud` is shaped per provider
+
+`aud` is enforced via `jwt.WithAudience` (exact match), which accepts either a string or an array — only one entry has to match. Per-provider gotchas:
+
+| Provider | Where `aud` comes from | Shape | What to put in `audience` |
+|----------|-----------------------|-------|----------------------------|
+| Keycloak | Audience protocol mapper on a client scope | string or array (often includes `"account"`) | The custom value emitted by your Audience mapper (e.g. `"watchword"`). Don't set this to `"account"` — that accepts every realm user. |
+| Auth0    | The `audience` query param sent to `/authorize` | array, typically `[<API Identifier>, "https://{tenant}.auth0.com/userinfo"]` | The API Identifier (matches the first array entry). If clients omit `audience` at `/authorize`, Auth0 returns an opaque token (not a JWT) — those won't validate. |
+| Cloudflare Worker OAuth | Whatever the Worker code stamps | depends on the Worker | The exact value the Worker uses. |
+| Cloudflare Access | The Application AUD tag | string (hex) | The Application AUD from the Access dashboard. Note Access uses a non-`Authorization` header, so swapping it in requires middleware changes. |
+
+#### Tracking who created an entry
+
+Watchword records the creator's identity on each new entry in a nullable `created_by` column. The column is surfaced on `get_entry`, `get_entry_by_word`, `list_entries`, `search_entries`, `search_words`, `store_entry`, `restore_entry`, and `upload_file` responses. It stays `null` for anonymous calls.
+
+Where `created_by` comes from:
+
+- **JWT requests:** the value of `auth.jwt.identity_claim` (default `sub`). Set it to `email` or `preferred_username` if you want a human-readable label.
+- **Named static tokens:** the `name` of the matching `auth.named_tokens` entry.
+- **Plain `auth.tokens`:** anonymous (`created_by` is null) — these tokens have no associated identity.
+- **Auth disabled:** anonymous.
+
+```yaml
+auth:
+  enabled: true
+  named_tokens:
+    - name: ci-bot
+      token: "ci-secret-xyz"
+    - name: alice
+      token: "alice-secret-xyz"
+  jwt:
+    jwks_url: "https://{tenant}.auth0.com/.well-known/jwks.json"
+    issuer:   "https://{tenant}.auth0.com/"
+    audience: "https://watchword.example.com/api"
+    identity_claim: "email"
+```
+
+Restoring an expired entry preserves the original `created_by`; it is not overwritten by the restorer.
+
+#### Required scopes
+
+`auth.jwt.required_scopes` enforces fine-grained access on top of issuer/audience. Every listed scope must appear in either the `scope` claim (space-delimited string, used by Auth0 and Keycloak) or the `scp` claim (array). Without this, any valid token from the configured issuer/audience is accepted.
+
+```yaml
+auth:
+  jwt:
+    jwks_url: "https://{tenant}.auth0.com/.well-known/jwks.json"
+    issuer:   "https://{tenant}.auth0.com/"
+    audience: "https://watchword.example.com/api"
+    required_scopes:
+      - "watchword:read"
+      - "watchword:write"
+```
 
 ### S3 file storage (optional)
 

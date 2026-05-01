@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/watchword/watchword/internal/auth"
 	"github.com/watchword/watchword/internal/domain"
 	"github.com/watchword/watchword/internal/repository"
 )
@@ -96,6 +97,9 @@ func (s *EntryService) StoreEntry(ctx context.Context, word string, payload stri
 			Word:      resolvedWord,
 			Payload:   payload,
 			ExpiresAt: expiresAt,
+		}
+		if id, ok := auth.IdentityFrom(ctx); ok {
+			entry.CreatedBy = &id
 		}
 		created, err := txRepo.Store(ctx, entry)
 		if err != nil {

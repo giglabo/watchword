@@ -6,20 +6,23 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/watchword/watchword/internal/config"
 	"github.com/watchword/watchword/internal/domain"
 )
 
 type Authenticator struct {
 	enabled             bool
 	tokens              []string
+	namedTokens         []config.NamedToken
 	jwt                 *JWTValidator
 	resourceMetadataURL string
 }
 
-func NewAuthenticator(enabled bool, tokens []string) *Authenticator {
+func NewAuthenticator(enabled bool, tokens []string, named []config.NamedToken) *Authenticator {
 	return &Authenticator{
-		enabled: enabled,
-		tokens:  tokens,
+		enabled:     enabled,
+		tokens:      tokens,
+		namedTokens: named,
 	}
 }
 
@@ -33,28 +36,36 @@ func (a *Authenticator) SetResourceMetadataURL(url string) {
 	a.resourceMetadataURL = url
 }
 
-func (a *Authenticator) Validate(token string) error {
+// Validate verifies the bearer token and returns the caller's identity.
+// Identity is the JWT identity claim (e.g. `sub`) for OAuth tokens, the
+// configured name for a `named_tokens` entry, or "" for an unnamed static
+// token / when auth is disabled. An empty identity means anonymous, not
+// failure — failures return ErrUnauthorized.
+func (a *Authenticator) Validate(token string) (string, error) {
 	if !a.enabled {
-		return nil
+		return "", nil
 	}
 	if token == "" {
-		return domain.ErrUnauthorized
+		return "", domain.ErrUnauthorized
 	}
 
-	// If the token looks like a JWT (has 2 dots) and we have a JWT validator, try JWT first
 	if a.jwt != nil && strings.Count(token, ".") == 2 {
-		if err := a.jwt.Validate(token); err == nil {
-			return nil
+		if id, err := a.jwt.Validate(token); err == nil {
+			return id, nil
 		}
 	}
 
-	// Fall back to plain token comparison
+	for _, nt := range a.namedTokens {
+		if subtle.ConstantTimeCompare([]byte(token), []byte(nt.Token)) == 1 {
+			return nt.Name, nil
+		}
+	}
 	for _, valid := range a.tokens {
 		if subtle.ConstantTimeCompare([]byte(token), []byte(valid)) == 1 {
-			return nil
+			return "", nil
 		}
 	}
-	return domain.ErrUnauthorized
+	return "", domain.ErrUnauthorized
 }
 
 func (a *Authenticator) HTTPMiddleware(next http.Handler) http.Handler {
@@ -82,11 +93,15 @@ func (a *Authenticator) HTTPMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if err := a.Validate(token); err != nil {
+		identity, err := a.Validate(token)
+		if err != nil {
 			a.writeUnauthorized(w, "invalid auth token")
 			return
 		}
 
+		if identity != "" {
+			r = r.WithContext(WithIdentity(r.Context(), identity))
+		}
 		next.ServeHTTP(w, r)
 	})
 }

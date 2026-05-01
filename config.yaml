@@ -14,6 +14,9 @@ auth:
   enabled: true
   tokens:
     - "your-secret-token-1"
+  # named_tokens:                  # Optional. Each entry's `name` is recorded as `created_by` for that token's requests.
+  #   - name: "ci-bot"
+  #     token: "ci-secret-xyz"
   # resource_metadata:               # RFC 9728 Protected Resource Metadata (MCP OAuth)
   #   resource: "https://watchword.example.com"
   #   authorization_servers:
@@ -24,6 +27,11 @@ auth:
   #   jwks_url: "https://auth.example.com/.well-known/jwks.json"
   #   issuer: "https://auth.example.com/"
   #   audience: "https://watchword.example.com"
+  #   required_scopes:               # Optional. All listed scopes must appear in `scope` or `scp` claim.
+  #     - "watchword:read"
+  #     - "watchword:write"
+  #   identity_claim: "sub"          # Optional. Claim used to populate `created_by`. Default: "sub". Common alternative: "email".
+  # See examples/keycloak.yaml and examples/auth0.yaml for ready-made provider configs.
   # oauth_metadata:                  # Legacy AS metadata (2025-03-26 MCP spec compat)
   #   authorization_endpoint: "https://auth.example.com/authorize"
   #   token_endpoint: "https://auth.example.com/oauth/token"

@@ -48,6 +48,9 @@ func (h *Handlers) StoreEntry(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if result.Entry.ExpiresAt != nil {
 		resp["expires_at"] = result.Entry.ExpiresAt
 	}
+	if result.Entry.CreatedBy != nil {
+		resp["created_by"] = *result.Entry.CreatedBy
+	}
 	if result.CollisionResolved {
 		resp["original_word"] = result.OriginalWord
 	}
@@ -81,6 +84,9 @@ func (h *Handlers) GetEntry(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		if entry.ExpiresAt != nil {
 			resp["expires_at"] = entry.ExpiresAt
 		}
+		if entry.CreatedBy != nil {
+			resp["created_by"] = *entry.CreatedBy
+		}
 		return marshalResult(resp)
 	}
 	return marshalResult(entry)
@@ -112,6 +118,9 @@ func (h *Handlers) GetEntryByWord(ctx context.Context, req mcp.CallToolRequest) 
 		}
 		if entry.ExpiresAt != nil {
 			resp["expires_at"] = entry.ExpiresAt
+		}
+		if entry.CreatedBy != nil {
+			resp["created_by"] = *entry.CreatedBy
 		}
 		return marshalResult(resp)
 	}
@@ -173,6 +182,9 @@ func (h *Handlers) RestoreEntry(ctx context.Context, req mcp.CallToolRequest) (*
 	if result.Entry.ExpiresAt != nil {
 		resp["expires_at"] = result.Entry.ExpiresAt
 	}
+	if result.Entry.CreatedBy != nil {
+		resp["created_by"] = *result.Entry.CreatedBy
+	}
 	if result.CollisionResolved {
 		resp["original_word"] = result.OriginalWord
 	}
@@ -224,12 +236,16 @@ func (h *Handlers) SearchWords(ctx context.Context, req mcp.CallToolRequest) (*m
 
 	words := make([]map[string]interface{}, 0, len(entries))
 	for _, e := range entries {
-		words = append(words, map[string]interface{}{
+		item := map[string]interface{}{
 			"word":       e.Word,
 			"id":         e.ID.String(),
 			"status":     e.Status,
 			"entry_type": e.EntryType,
-		})
+		}
+		if e.CreatedBy != nil {
+			item["created_by"] = *e.CreatedBy
+		}
+		words = append(words, item)
 	}
 
 	resp := map[string]interface{}{
@@ -281,6 +297,9 @@ func compactEntries(entries []*domain.Entry) []map[string]interface{} {
 		}
 		if e.ExpiresAt != nil {
 			item["expires_at"] = e.ExpiresAt
+		}
+		if e.CreatedBy != nil {
+			item["created_by"] = *e.CreatedBy
 		}
 		if e.EntryType == domain.EntryTypeText {
 			// Include payload length as a hint

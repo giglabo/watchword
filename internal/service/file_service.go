@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/watchword/watchword/internal/auth"
 	"github.com/watchword/watchword/internal/domain"
 	"github.com/watchword/watchword/internal/repository"
 	s3client "github.com/watchword/watchword/internal/s3"
@@ -46,17 +47,18 @@ func NewFileService(repo repository.Repository, presigner s3client.Presigner, de
 }
 
 type UploadResult struct {
-	Word              string `json:"word"`
-	ID                string `json:"id"`
-	UploadURL         string `json:"upload_url"`
-	ProxyUploadURL    string `json:"proxy_upload_url,omitempty"`
-	Filename          string `json:"filename"`
-	ContentType       string `json:"content_type"`
-	MaxSize           int64  `json:"max_size_bytes"`
-	CollisionResolved bool   `json:"collision_resolved"`
-	OriginalWord      string `json:"original_word,omitempty"`
-	ExpiresAt         string `json:"expires_at,omitempty"`
-	Hint              string `json:"hint"`
+	Word              string  `json:"word"`
+	ID                string  `json:"id"`
+	UploadURL         string  `json:"upload_url"`
+	ProxyUploadURL    string  `json:"proxy_upload_url,omitempty"`
+	Filename          string  `json:"filename"`
+	ContentType       string  `json:"content_type"`
+	MaxSize           int64   `json:"max_size_bytes"`
+	CollisionResolved bool    `json:"collision_resolved"`
+	OriginalWord      string  `json:"original_word,omitempty"`
+	ExpiresAt         string  `json:"expires_at,omitempty"`
+	CreatedBy         *string `json:"created_by,omitempty"`
+	Hint              string  `json:"hint"`
 }
 
 type DownloadResult struct {
@@ -124,6 +126,9 @@ func (s *FileService) UploadFile(ctx context.Context, word string, filename stri
 			EntryType: domain.EntryTypeFile,
 			ExpiresAt: expiresAt,
 		}
+		if id, ok := auth.IdentityFrom(ctx); ok {
+			entry.CreatedBy = &id
+		}
 		created, err := txRepo.Store(ctx, entry)
 		if err != nil {
 			return err
@@ -142,6 +147,7 @@ func (s *FileService) UploadFile(ctx context.Context, word string, filename stri
 			ContentType:       contentType,
 			MaxSize:           s.maxFileSize,
 			CollisionResolved: collision,
+			CreatedBy:         created.CreatedBy,
 			Hint:              fmt.Sprintf("Upload your file with: curl -X PUT -H 'Content-Type: %s' -T '%s' '%s'", contentType, filename, uploadURL),
 		}
 		if s.proxySigner != nil {
