@@ -156,6 +156,7 @@ type DatabaseConfig struct {
 	Driver   string         `yaml:"driver"`
 	SQLite   SQLiteConfig   `yaml:"sqlite"`
 	Postgres PostgresConfig `yaml:"postgres"`
+	LibSQL   LibSQLConfig   `yaml:"libsql"`
 }
 
 type SQLiteConfig struct {
@@ -164,6 +165,14 @@ type SQLiteConfig struct {
 
 type PostgresConfig struct {
 	DSN string `yaml:"dsn"`
+}
+
+// LibSQLConfig points at a remote libSQL/Turso database. URL is the canonical
+// connection URL (e.g. "libsql://my-db-org.turso.io"). AuthToken is the Turso
+// auth token; usually injected via env in production.
+type LibSQLConfig struct {
+	URL       string `yaml:"url"`
+	AuthToken string `yaml:"auth_token"`
 }
 
 type AuthConfig struct {
@@ -286,6 +295,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("WORDSTORE_DATABASE_POSTGRES_DSN"); v != "" {
 		cfg.Database.Postgres.DSN = v
+	}
+	if v := os.Getenv("WORDSTORE_DATABASE_LIBSQL_URL"); v != "" {
+		cfg.Database.LibSQL.URL = v
+	}
+	if v := os.Getenv("WORDSTORE_DATABASE_LIBSQL_AUTH_TOKEN"); v != "" {
+		cfg.Database.LibSQL.AuthToken = v
 	}
 	if v := os.Getenv("WORDSTORE_AUTH_ENABLED"); v != "" {
 		cfg.Auth.Enabled = v == "true" || v == "1"
@@ -510,15 +525,18 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("invalid server.transport: %q (must be stdio, sse, streamable-http, or http)", cfg.Server.Transport)
 	}
 	switch cfg.Database.Driver {
-	case "sqlite", "postgres":
+	case "sqlite", "postgres", "libsql":
 	default:
-		return fmt.Errorf("invalid database.driver: %q (must be sqlite or postgres)", cfg.Database.Driver)
+		return fmt.Errorf("invalid database.driver: %q (must be sqlite, postgres, or libsql)", cfg.Database.Driver)
 	}
 	if cfg.Database.Driver == "sqlite" && cfg.Database.SQLite.Path == "" {
 		return fmt.Errorf("database.sqlite.path is required when driver is sqlite")
 	}
 	if cfg.Database.Driver == "postgres" && cfg.Database.Postgres.DSN == "" {
 		return fmt.Errorf("database.postgres.dsn is required when driver is postgres")
+	}
+	if cfg.Database.Driver == "libsql" && cfg.Database.LibSQL.URL == "" {
+		return fmt.Errorf("database.libsql.url is required when driver is libsql")
 	}
 	if cfg.Auth.JWT != nil && cfg.Auth.JWT.JWKSURL == "" {
 		return fmt.Errorf("auth.jwt.jwks_url is required when jwt is configured")

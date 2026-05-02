@@ -40,7 +40,29 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Test (race detector)
+        env:
+          # libSQL/Turso integration tests run only when these are set, and
+          # skip cleanly otherwise. Forks / external PRs don't get repository
+          # secrets, so the pipeline still passes for them.
+          WATCHWORD_TEST_TURSO_URL: ${{ secrets.WATCHWORD_TEST_TURSO_URL }}
+          WATCHWORD_TEST_TURSO_AUTH_TOKEN: ${{ secrets.WATCHWORD_TEST_TURSO_AUTH_TOKEN }}
         run: go test -race -timeout 5m ./...
+
+  turso:
+    # Optional integration job — runs Turso tests in isolation. Uses
+    # `continue-on-error` so a flaky/unavailable test DB never blocks merges.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Turso integration tests
+        env:
+          WATCHWORD_TEST_TURSO_URL: ${{ secrets.WATCHWORD_TEST_TURSO_URL }}
+          WATCHWORD_TEST_TURSO_AUTH_TOKEN: ${{ secrets.WATCHWORD_TEST_TURSO_AUTH_TOKEN }}
+        run: go test -v -timeout 5m -run TestLibSQL ./internal/repository/...
 
   concurrency:
     runs-on: ubuntu-latest

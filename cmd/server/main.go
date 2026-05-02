@@ -299,6 +299,9 @@ func initRepo(ctx context.Context, cfg *config.Config, logger *slog.Logger) (rep
 	case "postgres":
 		logger.Info("initializing PostgreSQL")
 		return repository.NewPostgresRepo(ctx, cfg.Database.Postgres.DSN)
+	case "libsql":
+		logger.Info("initializing libSQL/Turso", "url", cfg.Database.LibSQL.URL)
+		return repository.NewLibSQLRepo(cfg.Database.LibSQL.URL, cfg.Database.LibSQL.AuthToken)
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Database.Driver)
 	}

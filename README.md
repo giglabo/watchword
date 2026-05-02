@@ -2,7 +2,9 @@
 
 An [MCP](https://modelcontextprotocol.io/) server that lets AI assistants store and retrieve prompts, snippets, and arbitrary text keyed by short, human-readable code words. Think of it as a shared clipboard between you and your LLM — say "save this as *falcon*", then later "show me *falcon*".
 
-Built in Go. Supports SQLite and PostgreSQL. Runs over stdio, SSE, or Streamable HTTP.
+Built in Go. Supports SQLite, PostgreSQL, and libSQL/Turso. Runs over stdio, SSE, or Streamable HTTP.
+
+<a href="https://turso.tech/"><img src="https://api.turso.tech/static/images/logo-turso-solo.svg" alt="Powered by Turso" height="32" /></a> &nbsp; **Now with libSQL/Turso support** — point Watchword at a hosted Turso database for SQLite-compatible storage at the edge. See [libSQL / Turso](#libsql--turso) below.
 
 ## Why
 
@@ -13,7 +15,7 @@ LLM conversations are ephemeral. Watchword gives your assistant persistent, name
 - **10 MCP tools** for storing, retrieving, searching, listing, restoring, deleting entries, and file upload/download
 - **S3 file storage** — upload/download files up to 1GB via presigned URLs (works with AWS S3 and Cloudflare R2)
 - **Collision resolution** — if a keyword is taken, the server auto-appends a suffix (`rabbit` -> `rabbit2`)
-- **SQLite or PostgreSQL** backends
+- **SQLite, PostgreSQL, or libSQL/Turso** backends
 - **Automatic expiration** — entries expire after a configurable TTL (or never, with `ttl_hours: 0`)
 - **Bearer token and JWT/JWKS authentication** — with optional named tokens for service accounts
 - **Per-entry `created_by` tracking** — populated from a JWT identity claim or a named static token, surfaced on read/list/search responses
@@ -143,9 +145,11 @@ All settings live in `config.yaml`. Every value can be overridden with environme
 
 | Setting | Env var | Default | Description |
 |---------|---------|---------|-------------|
-| `database.driver` | `WORDSTORE_DATABASE_DRIVER` | `sqlite` | `sqlite` or `postgres` |
+| `database.driver` | `WORDSTORE_DATABASE_DRIVER` | `sqlite` | `sqlite`, `postgres`, or `libsql` |
 | `database.sqlite.path` | `WORDSTORE_DATABASE_SQLITE_PATH` | `./data/word-store.db` | SQLite file path |
 | `database.postgres.dsn` | `WORDSTORE_DATABASE_POSTGRES_DSN` | | PostgreSQL connection string |
+| `database.libsql.url` | `WORDSTORE_DATABASE_LIBSQL_URL` | | libSQL/Turso DB URL (e.g. `libsql://my-db-org.turso.io`) |
+| `database.libsql.auth_token` | `WORDSTORE_DATABASE_LIBSQL_AUTH_TOKEN` | | Turso auth token (keep out of `config.yaml`; pass via env) |
 
 #### SQLite concurrency
 
@@ -185,6 +189,44 @@ The directory in `path` is created on startup, and migrations run on first boot.
 **2. Docker** — the default `docker-compose.yml` launches PostgreSQL alongside watchword. To run on SQLite, stop that compose stack (`docker compose down`) and either run the binary directly or use a compose override that drops the `postgres` service, sets `WORDSTORE_DATABASE_DRIVER=sqlite` plus `WORDSTORE_DATABASE_SQLITE_PATH=/data/word-store.db`, and mounts a named volume at `/data` so the DB file survives container restarts.
 
 **3. Migrating data (optional)** — switching driver starts from an empty database. If you need to carry entries across, dump the `entries` table from PostgreSQL (`COPY entries TO STDOUT (FORMAT csv, HEADER)`) and load it into SQLite with `.import`; the schemas are equivalent, but PostgreSQL `timestamptz` columns must be converted to RFC3339 strings for SQLite during the dump.
+
+#### libSQL / Turso
+
+<a href="https://turso.tech/"><img src="https://api.turso.tech/static/images/logo-turso-solo.svg" alt="Turso" height="40" /></a>
+
+[Turso](https://turso.tech/) is a managed libSQL service — SQLite-compatible, but accessed remotely over HTTP/WebSocket. Watchword talks to it through the pure-Go [`libsql-client-go`](https://github.com/tursodatabase/libsql-client-go) driver, so no CGO is required.
+
+The same `migrations/sqlite/*.sql` migrations run unchanged; the schema and SQL are identical to a local SQLite file. The only behavioral differences vs. the local SQLite backend:
+
+- **No client-side pragmas.** `journal_mode`, `busy_timeout`, `synchronous`, `foreign_keys` are server-controlled on Turso — the URI-pragma format used by the local backend isn't applied.
+- **Deferred transactions.** Turso doesn't expose `_txlock=immediate`; collision resolution still relies on the `(word, status)` unique constraint as the source of truth.
+
+**Config (env-driven, recommended for secrets):**
+
+```bash
+export WORDSTORE_DATABASE_DRIVER=libsql
+export WORDSTORE_DATABASE_LIBSQL_URL='libsql://your-db-org.turso.io'
+export WORDSTORE_DATABASE_LIBSQL_AUTH_TOKEN='<turso-auth-token>'
+./watchword
+```
+
+Or in `config.yaml`:
+
+```yaml
+database:
+  driver: "libsql"
+  libsql:
+    url: "libsql://your-db-org.turso.io"
+    # auth_token: prefer WORDSTORE_DATABASE_LIBSQL_AUTH_TOKEN env to keep tokens out of source control
+```
+
+Get a URL + auth token via the Turso CLI:
+
+```bash
+turso db create watchword
+turso db show watchword --url           # → libsql://watchword-<org>.turso.io
+turso db tokens create watchword        # → eyJhbGciOi...
+```
 
 ### Authentication
 
