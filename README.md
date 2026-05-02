@@ -147,6 +147,45 @@ All settings live in `config.yaml`. Every value can be overridden with environme
 | `database.sqlite.path` | `WORDSTORE_DATABASE_SQLITE_PATH` | `./data/word-store.db` | SQLite file path |
 | `database.postgres.dsn` | `WORDSTORE_DATABASE_POSTGRES_DSN` | | PostgreSQL connection string |
 
+#### SQLite concurrency
+
+The SQLite backend is configured for safe concurrent reads and writes:
+
+- **WAL journal mode** — multiple readers can run at the same time as one writer.
+- **`busy_timeout=5000`** — writers wait up to 5 s on lock contention instead of failing immediately.
+- **`BEGIN IMMEDIATE` for every transaction** — prevents busy-snapshot in read-then-write flows (collision resolution, file ops).
+- **`synchronous=NORMAL` + `foreign_keys=1`** applied to every pooled connection.
+- **Bounded connection pool** sized from CPU count.
+
+SQLite still serializes writers globally — that is a SQLite invariant — but readers run in parallel and write contention is absorbed by the busy timeout. For most MCP workloads this is more than sufficient; reach for PostgreSQL only if you need cross-process writers or a centralized DB.
+
+#### Switching from PostgreSQL to SQLite
+
+Driver selection is a config flip; there is no automatic data migration between backends.
+
+**1. Update config** — either edit `config.yaml`:
+
+```yaml
+database:
+  driver: "sqlite"
+  sqlite:
+    path: "./data/word-store.db"
+```
+
+…or override via env var (takes precedence over `config.yaml`):
+
+```bash
+export WORDSTORE_DATABASE_DRIVER=sqlite
+export WORDSTORE_DATABASE_SQLITE_PATH=./data/word-store.db
+./watchword
+```
+
+The directory in `path` is created on startup, and migrations run on first boot.
+
+**2. Docker** — the default `docker-compose.yml` launches PostgreSQL alongside watchword. To run on SQLite, stop that compose stack (`docker compose down`) and either run the binary directly or use a compose override that drops the `postgres` service, sets `WORDSTORE_DATABASE_DRIVER=sqlite` plus `WORDSTORE_DATABASE_SQLITE_PATH=/data/word-store.db`, and mounts a named volume at `/data` so the DB file survives container restarts.
+
+**3. Migrating data (optional)** — switching driver starts from an empty database. If you need to carry entries across, dump the `entries` table from PostgreSQL (`COPY entries TO STDOUT (FORMAT csv, HEADER)`) and load it into SQLite with `.import`; the schemas are equivalent, but PostgreSQL `timestamptz` columns must be converted to RFC3339 strings for SQLite during the dump.
+
 ### Authentication
 
 | Setting | Env var | Default | Description |
