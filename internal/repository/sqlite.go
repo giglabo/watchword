@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,19 +19,71 @@ type SQLiteRepo struct {
 	db *sql.DB
 }
 
+// buildSQLiteDSN turns a database path into a modernc.org/sqlite URI that
+// applies the pragmas required for safe concurrent access on every pooled
+// connection, and forces BEGIN IMMEDIATE for every transaction so the
+// read-then-write flows in the service layer cannot hit busy-snapshot.
+//
+//   - journal_mode=WAL      multi-reader / single-writer concurrency
+//   - busy_timeout=5000     wait up to 5s on lock contention instead of
+//                           failing immediately with SQLITE_BUSY
+//   - foreign_keys=1        enforce FKs on every connection (the prior
+//                           single Exec only configured one pool member)
+//   - synchronous=NORMAL    safe under WAL, much faster than FULL
+//   - _txlock=immediate     every BeginTx issues BEGIN IMMEDIATE so the
+//                           writer lock is acquired up front
+func buildSQLiteDSN(path string) string {
+	const pragmas = "_pragma=journal_mode(WAL)" +
+		"&_pragma=busy_timeout(5000)" +
+		"&_pragma=foreign_keys(1)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_txlock=immediate"
+
+	switch {
+	case path == ":memory:":
+		return "file::memory:?" + pragmas
+	case strings.HasPrefix(path, "file:"):
+		sep := "?"
+		if strings.Contains(path, "?") {
+			sep = "&"
+		}
+		return path + sep + pragmas
+	default:
+		return "file:" + path + "?" + pragmas
+	}
+}
+
+// sqlitePoolSize picks a reasonable bounded pool. SQLite serializes writes
+// globally, so a deep pool buys nothing for writes — but WAL allows truly
+// concurrent reads, so a handful of connections lets readers run in parallel.
+func sqlitePoolSize(path string) int {
+	if path == ":memory:" {
+		// Each new connection to ":memory:" opens a separate in-memory
+		// database. Pin to a single shared connection so the schema and
+		// data stay consistent across queries.
+		return 1
+	}
+	n := runtime.NumCPU() * 2
+	if n < 4 {
+		n = 4
+	}
+	if n > 16 {
+		n = 16
+	}
+	return n
+}
+
 func NewSQLiteRepo(dbPath string) (*SQLiteRepo, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", buildSQLiteDSN(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("setting WAL mode: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("enabling foreign keys: %w", err)
-	}
+
+	pool := sqlitePoolSize(dbPath)
+	db.SetMaxOpenConns(pool)
+	db.SetMaxIdleConns(pool)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+
 	return &SQLiteRepo{db: db}, nil
 }
 

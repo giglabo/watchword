@@ -39,8 +39,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Test
-        run: go test ./...
+      - name: Test (race detector)
+        run: go test -race -timeout 5m ./...
+
+  concurrency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: SQLite concurrency stress (repository)
+        run: go test -race -count=5 -run='Concurrent|PragmasOnEveryPoolConnection' -timeout 5m ./internal/repository/...
+      - name: SQLite concurrency stress (service)
+        run: go test -race -count=5 -run='Concurrent' -timeout 5m ./internal/service/...
 
   build:
     runs-on: ubuntu-latest
