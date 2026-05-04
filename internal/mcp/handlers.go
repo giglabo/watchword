@@ -192,6 +192,48 @@ func (h *Handlers) RestoreEntry(ctx context.Context, req mcp.CallToolRequest) (*
 	return marshalResult(resp)
 }
 
+func (h *Handlers) UpdateExpiration(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id := req.GetString("id", "")
+
+	var ttlHours *int
+	if args := req.GetArguments(); args != nil {
+		if _, ok := args["ttl_hours"]; ok {
+			t := req.GetInt("ttl_hours", 0)
+			ttlHours = &t
+		}
+	}
+
+	h.logger.Debug("update_expiration called", "id", id, "ttl_hours", ttlHours)
+
+	result, err := h.svc.UpdateExpiration(ctx, id, ttlHours)
+	if err != nil {
+		h.logger.Warn("update_expiration failed", "id", id, "error", err)
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	h.logger.Info("update_expiration success",
+		"id", result.Entry.ID, "word", result.Entry.Word,
+		"reactivated", result.Reactivated, "collision", result.CollisionResolved)
+
+	resp := map[string]interface{}{
+		"id":                 result.Entry.ID.String(),
+		"word":               result.Entry.Word,
+		"status":             result.Entry.Status,
+		"reactivated":        result.Reactivated,
+		"collision_resolved": result.CollisionResolved,
+	}
+	if result.Entry.ExpiresAt != nil {
+		resp["expires_at"] = result.Entry.ExpiresAt
+	}
+	if result.Entry.CreatedBy != nil {
+		resp["created_by"] = *result.Entry.CreatedBy
+	}
+	if result.CollisionResolved {
+		resp["original_word"] = result.OriginalWord
+	}
+	return marshalResult(resp)
+}
+
 func (h *Handlers) ListEntries(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	status := req.GetString("status", "")
 	limit := req.GetInt("limit", 20)

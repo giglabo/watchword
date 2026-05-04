@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/watchword/watchword/internal/auth"
 	"github.com/watchword/watchword/internal/domain"
@@ -220,6 +221,199 @@ func TestRestoreEntry(t *testing.T) {
 	_, err := svc.RestoreEntry(ctx, res2.Entry.ID.String(), nil)
 	if err != domain.ErrAlreadyActive {
 		t.Errorf("expected ErrAlreadyActive, got %v", err)
+	}
+}
+
+// newTestServiceWithRepo gives tests access to the underlying repo so they
+// can stage state (e.g. forcibly-expired entries) that the service API alone
+// can't produce.
+func newTestServiceWithRepo(t *testing.T) (*EntryService, repository.Repository) {
+	t.Helper()
+	repo, err := repository.NewSQLiteRepo(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLiteRepo: %v", err)
+	}
+	t.Cleanup(func() { repo.Close() })
+	if err := repo.Migrate(context.Background()); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	return NewEntryService(repo, 168, logger), repo
+}
+
+func TestUpdateExpiration_ExtendsActive(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	stored, err := svc.StoreEntry(ctx, "alpha", "payload", nil)
+	if err != nil {
+		t.Fatalf("StoreEntry: %v", err)
+	}
+	originalExpiry := *stored.Entry.ExpiresAt
+
+	ttl := 24
+	res, err := svc.UpdateExpiration(ctx, stored.Entry.ID.String(), &ttl)
+	if err != nil {
+		t.Fatalf("UpdateExpiration: %v", err)
+	}
+	if res.Reactivated {
+		t.Error("expected Reactivated=false for already-active entry")
+	}
+	if res.CollisionResolved {
+		t.Error("expected no collision for active entry")
+	}
+	if res.Entry.Status != domain.StatusActive {
+		t.Errorf("expected status=active, got %s", res.Entry.Status)
+	}
+	if res.Entry.ExpiresAt == nil {
+		t.Fatal("expected expires_at to be set")
+	}
+	if !res.Entry.ExpiresAt.Before(originalExpiry) {
+		t.Errorf("expected new expiry (24h) before original (default 168h); got %v vs %v",
+			res.Entry.ExpiresAt, originalExpiry)
+	}
+}
+
+func TestUpdateExpiration_ZeroTTLClearsExpiry(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	stored, _ := svc.StoreEntry(ctx, "perm", "p", nil)
+	if stored.Entry.ExpiresAt == nil {
+		t.Fatal("precondition: stored entry should have default expiry")
+	}
+
+	zero := 0
+	res, err := svc.UpdateExpiration(ctx, stored.Entry.ID.String(), &zero)
+	if err != nil {
+		t.Fatalf("UpdateExpiration: %v", err)
+	}
+	if res.Entry.ExpiresAt != nil {
+		t.Errorf("expected nil expires_at for ttl=0, got %v", res.Entry.ExpiresAt)
+	}
+}
+
+func TestUpdateExpiration_ReactivatesExpired(t *testing.T) {
+	svc, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	// Stage an entry expired in the past then mark expired via the worker path.
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if _, err := repo.Store(ctx, &domain.Entry{Word: "ghost", Payload: "x", ExpiresAt: &past}); err != nil {
+		t.Fatalf("seed Store: %v", err)
+	}
+	if _, err := repo.MarkExpiredBatch(ctx, 100); err != nil {
+		t.Fatalf("MarkExpiredBatch: %v", err)
+	}
+
+	res, err := svc.UpdateExpiration(ctx, "ghost", nil)
+	if err != nil {
+		t.Fatalf("UpdateExpiration: %v", err)
+	}
+	if !res.Reactivated {
+		t.Error("expected Reactivated=true")
+	}
+	if res.Entry.Status != domain.StatusActive {
+		t.Errorf("expected status=active, got %s", res.Entry.Status)
+	}
+	if res.Entry.Word != "ghost" {
+		t.Errorf("expected word=ghost (no collision), got %q", res.Entry.Word)
+	}
+	if res.Entry.ExpiresAt == nil {
+		t.Error("expected default TTL to be applied")
+	}
+}
+
+func TestUpdateExpiration_ReactivateWithCollision(t *testing.T) {
+	svc, repo := newTestServiceWithRepo(t)
+	ctx := context.Background()
+
+	// Expired entry on the base word.
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	expired, err := repo.Store(ctx, &domain.Entry{Word: "echo", Payload: "old", ExpiresAt: &past})
+	if err != nil {
+		t.Fatalf("seed Store: %v", err)
+	}
+	if _, err := repo.MarkExpiredBatch(ctx, 100); err != nil {
+		t.Fatalf("MarkExpiredBatch: %v", err)
+	}
+	// Active entry now squats on the same word — by-word lookup would return
+	// this one, so target the expired entry explicitly via its UUID.
+	if _, err := svc.StoreEntry(ctx, "echo", "new", nil); err != nil {
+		t.Fatalf("StoreEntry squat: %v", err)
+	}
+
+	res, err := svc.UpdateExpiration(ctx, expired.ID.String(), nil)
+	if err != nil {
+		t.Fatalf("UpdateExpiration: %v", err)
+	}
+	if !res.Reactivated || !res.CollisionResolved {
+		t.Errorf("expected Reactivated && CollisionResolved, got reactivated=%v collision=%v",
+			res.Reactivated, res.CollisionResolved)
+	}
+	if res.Entry.Word != "echo2" {
+		t.Errorf("expected resolved word echo2, got %q", res.Entry.Word)
+	}
+	if res.OriginalWord != "echo" {
+		t.Errorf("expected OriginalWord=echo, got %q", res.OriginalWord)
+	}
+}
+
+func TestUpdateExpiration_ByWord(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.StoreEntry(ctx, "kappa", "payload", nil); err != nil {
+		t.Fatalf("StoreEntry: %v", err)
+	}
+
+	zero := 0
+	res, err := svc.UpdateExpiration(ctx, "kappa", &zero)
+	if err != nil {
+		t.Fatalf("UpdateExpiration by word: %v", err)
+	}
+	if res.Entry.Word != "kappa" {
+		t.Errorf("expected word=kappa, got %q", res.Entry.Word)
+	}
+	if res.Entry.ExpiresAt != nil {
+		t.Errorf("expected expires_at cleared, got %v", res.Entry.ExpiresAt)
+	}
+}
+
+func TestUpdateExpiration_NotFound(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.UpdateExpiration(ctx, "nonexistent", nil); err != domain.ErrNotFound {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+
+	if _, err := svc.UpdateExpiration(ctx, "00000000-0000-0000-0000-000000000000", nil); err != domain.ErrNotFound {
+		t.Errorf("expected ErrNotFound for unknown UUID, got %v", err)
+	}
+}
+
+func TestUpdateExpiration_InvalidTTL(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	stored, _ := svc.StoreEntry(ctx, "thing", "payload", nil)
+
+	tooBig := domain.MaxTTLHours + 1
+	if _, err := svc.UpdateExpiration(ctx, stored.Entry.ID.String(), &tooBig); err != domain.ErrInvalidTTL {
+		t.Errorf("expected ErrInvalidTTL for ttl > max, got %v", err)
+	}
+
+	negative := -1
+	if _, err := svc.UpdateExpiration(ctx, stored.Entry.ID.String(), &negative); err != domain.ErrInvalidTTL {
+		t.Errorf("expected ErrInvalidTTL for negative ttl, got %v", err)
+	}
+}
+
+func TestUpdateExpiration_EmptyRef(t *testing.T) {
+	svc := newTestService(t)
+	if _, err := svc.UpdateExpiration(context.Background(), "   ", nil); err != domain.ErrInvalidWord {
+		t.Errorf("expected ErrInvalidWord for blank reference, got %v", err)
 	}
 }
 

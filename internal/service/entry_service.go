@@ -46,6 +46,13 @@ type RestoreResult struct {
 	OriginalWord      string        `json:"original_word,omitempty"`
 }
 
+type UpdateExpirationResult struct {
+	Entry             *domain.Entry `json:"entry"`
+	Reactivated       bool          `json:"reactivated"`
+	CollisionResolved bool          `json:"collision_resolved"`
+	OriginalWord      string        `json:"original_word,omitempty"`
+}
+
 type EntryService struct {
 	repo       repository.Repository
 	defaultTTL int // hours
@@ -223,6 +230,95 @@ func (s *EntryService) RestoreEntry(ctx context.Context, idStr string, newTTLHou
 		return nil, err
 	}
 	return result, nil
+}
+
+// UpdateExpiration adjusts the expires_at of an entry referenced by UUID or
+// word. When the entry is currently expired, it is reactivated (with collision
+// resolution against the base word, mirroring restore_entry); when it is
+// active, only expires_at is updated. ttlHours follows the same semantics as
+// store_entry: nil → server default, 0 → never expires, positive → relative
+// to now. The underlying S3 object (for file entries) is intentionally never
+// touched — resetting an expiration must not destroy data.
+func (s *EntryService) UpdateExpiration(ctx context.Context, idOrWord string, ttlHours *int) (*UpdateExpirationResult, error) {
+	if strings.TrimSpace(idOrWord) == "" {
+		return nil, domain.ErrInvalidWord
+	}
+
+	ttl := s.defaultTTL
+	if ttlHours != nil {
+		if *ttlHours < 0 || *ttlHours > domain.MaxTTLHours {
+			return nil, domain.ErrInvalidTTL
+		}
+		ttl = *ttlHours
+	}
+
+	var expiresAt *time.Time
+	if ttl > 0 {
+		t := time.Now().UTC().Add(time.Duration(ttl) * time.Hour)
+		expiresAt = &t
+	}
+
+	var result *UpdateExpirationResult
+	err := s.repo.WithTx(ctx, func(txRepo repository.Repository) error {
+		entry, err := lookupEntry(ctx, txRepo, idOrWord)
+		if err != nil {
+			return err
+		}
+
+		newStatus := entry.Status
+		newWord := entry.Word
+		var collision bool
+		var originalWord string
+		reactivated := false
+
+		if entry.Status == domain.StatusExpired {
+			resolved, c, rErr := resolveWord(ctx, txRepo, entry.Word)
+			if rErr != nil {
+				return rErr
+			}
+			newWord = resolved
+			collision = c
+			if c {
+				originalWord = entry.Word
+			}
+			newStatus = domain.StatusActive
+			reactivated = true
+		}
+
+		if err := txRepo.UpdateStatus(ctx, entry.ID, string(newStatus), newWord, expiresAt); err != nil {
+			return err
+		}
+
+		entry.Status = newStatus
+		entry.Word = newWord
+		entry.ExpiresAt = expiresAt
+		entry.UpdatedAt = time.Now().UTC()
+
+		result = &UpdateExpirationResult{
+			Entry:             entry,
+			Reactivated:       reactivated,
+			CollisionResolved: collision,
+			OriginalWord:      originalWord,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// lookupEntry resolves a UUID-or-word reference within the active transaction.
+// Word lookups include expired entries so update_expiration can target them.
+func lookupEntry(ctx context.Context, repo repository.Repository, idOrWord string) (*domain.Entry, error) {
+	if id, err := uuid.Parse(idOrWord); err == nil {
+		return repo.GetByID(ctx, id)
+	}
+	word := strings.TrimSpace(idOrWord)
+	if word == "" {
+		return nil, domain.ErrInvalidWord
+	}
+	return repo.GetByWord(ctx, word, true)
 }
 
 // ResolveEntry resolves a UUID or word to an entry without modifying it.
