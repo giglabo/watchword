@@ -48,16 +48,17 @@ type ProxyConfig struct {
 }
 
 type ToolsConfig struct {
-	StoreEntry     ToolDesc `yaml:"store_entry"`
-	GetEntry       ToolDesc `yaml:"get_entry"`
-	GetEntryByWord ToolDesc `yaml:"get_entry_by_word"`
-	SearchEntries  ToolDesc `yaml:"search_entries"`
-	RestoreEntry   ToolDesc `yaml:"restore_entry"`
-	ListEntries    ToolDesc `yaml:"list_entries"`
-	DeleteEntry    ToolDesc `yaml:"delete_entry"`
-	SearchWords    ToolDesc `yaml:"search_words"`
-	UploadFile     ToolDesc `yaml:"upload_file"`
-	DownloadFile   ToolDesc `yaml:"download_file"`
+	StoreEntry       ToolDesc `yaml:"store_entry"`
+	GetEntry         ToolDesc `yaml:"get_entry"`
+	GetEntryByWord   ToolDesc `yaml:"get_entry_by_word"`
+	SearchEntries    ToolDesc `yaml:"search_entries"`
+	RestoreEntry     ToolDesc `yaml:"restore_entry"`
+	UpdateExpiration ToolDesc `yaml:"update_expiration"`
+	ListEntries      ToolDesc `yaml:"list_entries"`
+	DeleteEntry      ToolDesc `yaml:"delete_entry"`
+	SearchWords      ToolDesc `yaml:"search_words"`
+	UploadFile       ToolDesc `yaml:"upload_file"`
+	DownloadFile     ToolDesc `yaml:"download_file"`
 }
 
 type ToolDesc struct {
@@ -101,6 +102,13 @@ var defaultToolsConfig = ToolsConfig{
 		Properties: map[string]string{
 			"id":            "The UUID of the expired entry to restore.",
 			"new_ttl_hours": "Optional. Set a new TTL in hours from now. 0 = never expires. Omit to use server default.",
+		},
+	},
+	UpdateExpiration: ToolDesc{
+		Description: "Update or reset the expiration of an entry referenced by UUID or keyword. Works on both active and expired entries: if expired, the entry is reactivated (collision-resolved against its original word, like restore_entry). Use this to extend a TTL, make an entry permanent, or revive an expired one. The underlying file (for file entries) is preserved — resetting expiration never deletes data. IMPORTANT: tell the user the RETURNED word, which may differ from the original if a collision was resolved.",
+		Properties: map[string]string{
+			"id":        "The UUID or keyword of the entry to update.",
+			"ttl_hours": "Optional. New TTL in hours from now. 0 = never expires. Omit to use the server default.",
 		},
 	},
 	ListEntries: ToolDesc{
@@ -511,6 +519,7 @@ func applyToolDefaults(cfg *Config) {
 	mergeToolDesc(&cfg.Tools.GetEntryByWord, d.GetEntryByWord)
 	mergeToolDesc(&cfg.Tools.SearchEntries, d.SearchEntries)
 	mergeToolDesc(&cfg.Tools.RestoreEntry, d.RestoreEntry)
+	mergeToolDesc(&cfg.Tools.UpdateExpiration, d.UpdateExpiration)
 	mergeToolDesc(&cfg.Tools.ListEntries, d.ListEntries)
 	mergeToolDesc(&cfg.Tools.DeleteEntry, d.DeleteEntry)
 	mergeToolDesc(&cfg.Tools.SearchWords, d.SearchWords)

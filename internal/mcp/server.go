@@ -27,6 +27,9 @@ var propTypes = map[string]map[string]string{
 	"restore_entry": {
 		"id": "string", "new_ttl_hours": "integer",
 	},
+	"update_expiration": {
+		"id": "string", "ttl_hours": "integer",
+	},
 	"list_entries": {
 		"status": "string", "limit": "integer", "offset": "integer",
 		"sort_by": "string", "sort_order": "string",
@@ -113,6 +116,16 @@ func NewServer(svc *service.EntryService, fileSvc *service.FileService, tools co
 			Required:   []string{"id"},
 		},
 	}, h.RestoreEntry)
+
+	s.AddTool(mcp.Tool{
+		Name:        "update_expiration",
+		Description: tools.UpdateExpiration.Description,
+		InputSchema: mcp.ToolInputSchema{
+			Type:       "object",
+			Properties: buildProps("update_expiration", tools.UpdateExpiration.Properties),
+			Required:   []string{"id"},
+		},
+	}, h.UpdateExpiration)
 
 	s.AddTool(mcp.Tool{
 		Name:        "list_entries",

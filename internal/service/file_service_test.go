@@ -8,6 +8,9 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/watchword/watchword/internal/domain"
 	"github.com/watchword/watchword/internal/repository"
@@ -172,4 +175,46 @@ func TestUploadFile_KeyPrefix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Resetting the expiration of a file entry — whether to extend its life or to
+// reactivate it after expiry — must never delete the underlying S3 object.
+// This is the contract relied on by the update_expiration tool.
+func TestUpdateExpiration_FileEntry_PreservesS3(t *testing.T) {
+	fileSvc, repo, pres := newTestFileService(t)
+	ctx := context.Background()
+
+	uploaded, err := fileSvc.UploadFile(ctx, "doc", "report.pdf", "application/pdf", nil)
+	if err != nil {
+		t.Fatalf("UploadFile: %v", err)
+	}
+
+	// Force-expire the entry through the repo, mirroring what the worker does.
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if err := repo.UpdateStatus(ctx, mustParseUUID(t, uploaded.ID), string(domain.StatusActive), uploaded.Word, &past); err != nil {
+		t.Fatalf("seed expiry: %v", err)
+	}
+	if _, err := repo.MarkExpiredBatch(ctx, 100); err != nil {
+		t.Fatalf("MarkExpiredBatch: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	entrySvc := NewEntryService(repo, 168, logger)
+
+	if _, err := entrySvc.UpdateExpiration(ctx, "doc", nil); err != nil {
+		t.Fatalf("UpdateExpiration: %v", err)
+	}
+
+	if len(pres.deletes) != 0 {
+		t.Errorf("update_expiration must not delete S3 objects; observed deletes=%v", pres.deletes)
+	}
+}
+
+func mustParseUUID(t *testing.T, s string) uuid.UUID {
+	t.Helper()
+	id, err := uuid.Parse(s)
+	if err != nil {
+		t.Fatalf("uuid.Parse(%q): %v", s, err)
+	}
+	return id
 }

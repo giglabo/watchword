@@ -6,14 +6,22 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/watchword/watchword/internal/domain"
 	"github.com/watchword/watchword/internal/repository"
 	"github.com/watchword/watchword/internal/service"
 )
 
 func newTestHandlers(t *testing.T) *Handlers {
+	t.Helper()
+	h, _ := newTestHandlersWithRepo(t)
+	return h
+}
+
+func newTestHandlersWithRepo(t *testing.T) (*Handlers, repository.Repository) {
 	t.Helper()
 	repo, err := repository.NewSQLiteRepo(":memory:")
 	if err != nil {
@@ -25,7 +33,7 @@ func newTestHandlers(t *testing.T) *Handlers {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	svc := service.NewEntryService(repo, 168, logger)
-	return &Handlers{svc: svc, logger: logger}
+	return &Handlers{svc: svc, logger: logger}, repo
 }
 
 func callTool(t *testing.T, h *Handlers, name string, args map[string]interface{}) map[string]interface{} {
@@ -53,6 +61,8 @@ func callTool(t *testing.T, h *Handlers, name string, args map[string]interface{
 		result, err = h.RestoreEntry(ctx, req)
 	case "delete_entry":
 		result, err = h.DeleteEntry(ctx, req)
+	case "update_expiration":
+		result, err = h.UpdateExpiration(ctx, req)
 	default:
 		t.Fatalf("unknown tool: %s", name)
 	}
@@ -290,6 +300,83 @@ func TestMCP_StoreEntry_ZeroTTL(t *testing.T) {
 	}
 	if out["expires_at"] != nil {
 		t.Errorf("expected no expires_at for TTL=0, got %v", out["expires_at"])
+	}
+}
+
+func TestMCP_UpdateExpiration_Active(t *testing.T) {
+	h := newTestHandlers(t)
+
+	stored := callTool(t, h, "store_entry", map[string]interface{}{
+		"word": "extend", "payload": "p",
+	})
+
+	out := callTool(t, h, "update_expiration", map[string]interface{}{
+		"id":        stored["id"],
+		"ttl_hours": float64(48),
+	})
+	if out["status"] != "active" {
+		t.Errorf("expected status=active, got %v", out["status"])
+	}
+	if out["reactivated"] != false {
+		t.Errorf("expected reactivated=false, got %v", out["reactivated"])
+	}
+	if out["expires_at"] == nil {
+		t.Error("expected expires_at to be set")
+	}
+}
+
+func TestMCP_UpdateExpiration_ZeroTTLClearsExpiry(t *testing.T) {
+	h := newTestHandlers(t)
+
+	stored := callTool(t, h, "store_entry", map[string]interface{}{
+		"word": "perm", "payload": "p",
+	})
+
+	out := callTool(t, h, "update_expiration", map[string]interface{}{
+		"id":        stored["id"],
+		"ttl_hours": float64(0),
+	})
+	if _, hasExp := out["expires_at"]; hasExp {
+		t.Errorf("expected no expires_at for ttl=0, got %v", out["expires_at"])
+	}
+	if out["status"] != "active" {
+		t.Errorf("expected status=active, got %v", out["status"])
+	}
+}
+
+func TestMCP_UpdateExpiration_ReactivatesExpired(t *testing.T) {
+	h, repo := newTestHandlersWithRepo(t)
+	ctx := context.Background()
+
+	past := time.Now().UTC().Add(-1 * time.Hour)
+	if _, err := repo.Store(ctx, &domain.Entry{Word: "fossil", Payload: "old", ExpiresAt: &past}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := repo.MarkExpiredBatch(ctx, 100); err != nil {
+		t.Fatalf("MarkExpiredBatch: %v", err)
+	}
+
+	out := callTool(t, h, "update_expiration", map[string]interface{}{
+		"id": "fossil",
+	})
+	if out["status"] != "active" {
+		t.Errorf("expected status=active, got %v", out["status"])
+	}
+	if out["reactivated"] != true {
+		t.Errorf("expected reactivated=true, got %v", out["reactivated"])
+	}
+	if out["word"] != "fossil" {
+		t.Errorf("expected word=fossil, got %v", out["word"])
+	}
+}
+
+func TestMCP_UpdateExpiration_NotFound(t *testing.T) {
+	h := newTestHandlers(t)
+	out := callTool(t, h, "update_expiration", map[string]interface{}{
+		"id": "no-such-word",
+	})
+	if _, ok := out["_error"]; !ok {
+		t.Error("expected error for unknown reference")
 	}
 }
 
