@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Watchword logo">
+  <title>Watchword</title>
+  <desc>A key whose bow is a circle containing the letter W — a keyword as a key.</desc>
+
+  <g fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Key bow -->
+    <circle cx="55" cy="100" r="36"/>
+
+    <!-- W inside the bow -->
+    <path d="M37 88 L47 117 L55 100 L63 117 L73 88" stroke-width="8"/>
+
+    <!-- Shaft -->
+    <line x1="91" y1="100" x2="180" y2="100"/>
+
+    <!-- Teeth -->
+    <path d="M152 100 L152 122 L166 122 L166 100"/>
+    <path d="M130 100 L130 114 L141 114 L141 100"/>
+  </g>
+</svg>

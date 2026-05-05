@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/lockup.svg" alt="Watchword" width="420" />
+</p>
+
 # Watchword
 
 An [MCP](https://modelcontextprotocol.io/) server that lets AI assistants store and retrieve prompts, snippets, and arbitrary text keyed by short, human-readable code words. Think of it as a shared clipboard between you and your LLM — say "save this as *falcon*", then later "show me *falcon*".
@@ -606,6 +610,16 @@ internal/worker/          Background expiration goroutine
 internal/health/          Health/status HTTP endpoints
 migrations/               Embedded SQL migrations (SQLite + PostgreSQL)
 ```
+
+## Brand assets
+
+SVG marks live in [`assets/`](assets/) and use `currentColor`, so they pick up the surrounding text color.
+
+| Asset | File | Size |
+| --- | --- | --- |
+| Logo mark | [`logo.svg`](assets/logo.svg) | 200×200 |
+| Favicon | [`favicon.svg`](assets/favicon.svg) | 32×32 |
+| Horizontal lockup | [`lockup.svg`](assets/lockup.svg) | 600×140 |
 
 ## License
 
