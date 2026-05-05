@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 140" width="600" height="140" role="img" aria-label="Watchword">
+  <title>Watchword</title>
+  <desc>Watchword logo lockup: key mark with wordmark (dark theme).</desc>
+
+  <!-- Mark -->
+  <g fill="none" stroke="#e6edf3" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" transform="translate(20,20)">
+    <circle cx="40" cy="50" r="26"/>
+    <path d="M27 41 L34 62 L40 50 L46 62 L53 41" stroke-width="6"/>
+    <line x1="66" y1="50" x2="130" y2="50"/>
+    <path d="M110 50 L110 66 L120 66 L120 50"/>
+    <path d="M94 50 L94 60 L102 60 L102 50"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="200" y="82"
+        font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif"
+        font-size="46"
+        font-weight="500"
+        letter-spacing="-1"
+        fill="#e6edf3">watchword</text>
+</svg>

@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/lockup.svg" alt="Watchword" width="420" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/lockup-dark.svg">
+    <img src="assets/lockup-light.svg" alt="Watchword" width="420" />
+  </picture>
 </p>
 
 # Watchword
