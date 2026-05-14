@@ -627,3 +627,55 @@ SVG marks live in [`assets/`](assets/) and use `currentColor`, so they pick up t
 ## License
 
 [MIT](LICENSE)
+
+---
+
+## Watchword — Persistent Memory for AI Agents
+
+Open-source MCP (Model Context Protocol) server that lets any AI agent store and recall text, prompts, and files under memorable keywords. Shared memory across Claude, ChatGPT, Cursor, Gemini, Copilot, Codex CLI, Kilo Code, Grok CLI, and any other MCP client.
+
+### What it does
+
+One agent drops a result under a keyword — another picks it up and keeps going. Next chat, another machine, a teammate's setup. No files, no copy-paste, no "can you resend that?"
+
+You save any piece of work — a design decision, a research summary, a prompt, a file — into Watchword under a memorable keyword. Any AI tool that speaks MCP can instantly retrieve it by that keyword: in the next chat, on another machine, or by your teammate in a completely different setup.
+
+### Key features
+
+- **Stop sending files** — Save work directly from your AI. Your teammate retrieves it from theirs. No attachments, no links, no "which version is this?"
+- **Works across chats and sessions** — Pick up exactly where you left off, even in a new chat window, a new session, or a fresh context.
+- **Smart keywords, generated for you** — When saving, your AI suggests a relevant, human-readable keyword automatically.
+- **Works with any AI tool** — Claude, Cursor, Copilot, custom agents — if it speaks MCP, it works with Watchword. No vendor lock-in.
+- **Shared memory for your whole team** — One Watchword instance, shared across teammates. Everyone's AI works from the same ground truth.
+- **Open source & self-hosted** — Deploy on your own infrastructure. Your data never touches a third-party server. MIT-licensed.
+- **Handles up to 1 GB per entry** — Large codebases, full research dumps, heavy output.
+- **Auto-expires after 7 days** — Entries clean themselves up by default. Per-entry TTL override supported.
+
+### Tech & deployment
+
+- Go binary, Docker image, or Kubernetes manifest
+- SQLite for local development and single-user installs (zero setup)
+- PostgreSQL for production and multi-replica Kubernetes deployments
+- Migrations run automatically at startup
+- One-click Blueprint deploy on render.com — fork, set 3 secrets, deploy
+- Turso / libSQL persistent storage — free tier covers ~500 MB and 1B row reads
+- Auto HTTPS, custom domain, zero-downtime redeploys on every git push
+- Starts at $0 on Render free tier + Turso free tier
+
+### Authentication
+
+- Bearer tokens (`WORDSTORE_AUTH_TOKENS`) for solo dev
+- JWT/JWKS validation against any IdP — Auth0, Keycloak, Cognito, Cloudflare Access
+- OAuth 2.1 + PKCE with Dynamic Client Registration (RFC 7591) via included Cloudflare Worker
+- RFC 9728 / RFC 8414 Protected Resource Metadata for auto-discovery by MCP clients (e.g., Claude.ai connector flow)
+- Audience scoping, per-user identity claims, audit logs that name humans
+
+### Paid add-on: MCP Auth Setup Guide
+
+Production-grade authentication blueprint for Watchword and any MCP server your team ships. PDF + copy-paste configs. One-time purchase, lifetime updates. Covers bearer tokens, JWT/JWKS against Auth0/Keycloak/Cognito/Cloudflare Access, Cloudflare Worker OAuth 2.1 proxy with DCR for Claude.ai connectors, reverse-proxy patterns (Caddy/Nginx/Traefik), and 27 production-verified setup gotchas (including 7 Auth0 DCR blockers not in official docs).
+
+---
+
+### 👉 [Visit heretic.giglabo.com/tools/watchword](https://heretic.giglabo.com/tools/watchword)
+
+**Why click through?** Get the one-click Render deploy blueprint, the full deploy guide, and the MCP Auth Setup Guide — everything you need to go from `git clone` to a production MCP server your whole team's AI agents can share, in under 10 minutes. Stop pasting files between chats. Give your agents a memory.
